@@ -1,6 +1,12 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# pnpm blocks dependency build scripts by default and fails the install when it
+# does. These two are deliberate dependencies, allowed by name:
+#   esbuild — the compiler behind tsx, which runs every test
+#   koffi   — calls timeBeginPeriod on Windows so the network profile is actually
+#             applied (packages/transport/src/timer-resolution.ts, SSOT §4.5)
 allowBuilds:
-  esbuild: set this to true or false
-  koffi: set this to true or false
+  esbuild: true
+  koffi: true

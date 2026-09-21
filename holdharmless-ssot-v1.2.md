@@ -261,6 +261,10 @@ function gateFor(channel: Channel, holdSuspected: boolean, navMode: NavMode): Ga
 
 **Honesty boundary.** Depth and drain behavior are configured to model documented telephony playout, not measured from one. Against a real platform the depth is not under our control. Stated in §1.7.
 
+**A 200 ms queue only works if the sender is paced — and that relocates the problem ADR-007 describes.** AssemblyAI emits `reply.audio` faster than real time. An unpaced sender would overflow a 200 ms playout queue within a fraction of a second, the queue would drop its oldest frames as §10.3 requires, and the far end would hear only the tail of every reply. So the Audio Bridge must pace output to the 20 ms frame cadence (§3.2 already assigns it "pacing"), buffering the burst on the core side.
+
+The consequence is easy to miss: ADR-007's "seconds of speech already queued when the gate closes" do not sit in the harness's playout queue — which holds at most 200 ms — but in **the Audio Bridge's pacing buffer**. A `clear` that empties only the far-end queue would leave those seconds to be sent the moment the gate reopens. **Closing the gate must therefore flush the pacing buffer as well as send `clear`.** `INV-3`'s "zero unplayed agent frames" has to be checked at both ends, and A-3 must measure both. Recorded here from module 1.3; it lands in code with the Audio Bridge in week 2.
+
 ### ADR-009 — Turn detection timing is a session-level decision
 
 **Decision.** `min_silence` and `max_silence` are never set, anywhere.
@@ -634,7 +638,9 @@ One bidirectional WebSocket. No resampling anywhere. Frame format is identical i
 
 Two properties of the measurement matter as much as the number. The spread is narrow — 202 ms between fastest and slowest across twenty turns — which is what makes a p90 meaningful rather than an artifact. And the reply began before the silence tail had finished streaming, which is adaptive endpointing behaving as ADR-009 assumes.
 
-**Measured on a local Windows 11 host.** Per ADR-003 this figure belongs to that host and no other. A demo given from a different machine invalidates it and E3 must be repeated there (`A-33`).
+**Measured on a local Windows 11 host, and before the timer-resolution fix in §4.5.** The figure stands, for a specific reason: both timestamps are taken by code running at the moment of the I/O it measures — the last `input.audio` send and the first `reply.audio` arrival — and I/O callbacks are not subject to the 15.625 ms timer quantum. The observed values (332, 347, 365 ms …) are not multiples of it, which confirms the clock was fine-grained. What the coarse timer did affect was input **pacing**: frames reached the API in small bursts rather than one per 20 ms, with the correct average rate. That is unlikely to move the endpoint, but it is a difference from the harness path, so E3 is re-run under the fix on the demo host regardless (A-33).
+
+Per ADR-003 this figure belongs to that host and no other. A demo given from a different machine invalidates it and E3 must be repeated there (`A-33`).
 
 The round trip to the API is a declared parameter, measured by E3 on the demo host, and reported separately rather than folded in, so the same measurement remains meaningful if the host changes.
 
@@ -747,6 +753,8 @@ type ClosingKind = 'wrapup' | 'escalation';
 |---|---|
 | **Channel** | `AcousticObservation`, `SemanticObservation`, `notify_transfer`, transport events |
 | **Phase** | Tool calls, phase timers, `reply.done` session events |
+
+**Precision, added in v1.3.** "Exactly one class" overstates it slightly, and §5.3 is the more specific authority. Three channel transitions are produced by **timers** — `HOLD_TIMEOUT_MS`, `TRANSFER_TIMEOUT_MS`, and `HOLD_CUE` followed by `HOLD_CONFIRM_MS` — and two phase transitions are produced by **channel events**, as the atomic follow-ups described under §5.3. What `INV-21` actually requires, and what `packages/callmodel` enforces, is the property the argument depends on: **every transition names a producer from the closed set of six**, and every row carries it as data. The table above describes the typical producers of each dimension, not an exclusive partition.
 
 ### 5.2 Why the human conversation is one phase, not three
 
