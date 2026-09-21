@@ -244,19 +244,12 @@ export const INVARIANTS: readonly Invariant[] = [
     id: 'INV-4',
     when: 'transition',
     description:
-      'No reply.requested while the gate is not open or hold is suspected, except one hold_probe per call (§6.7). ' +
-      'NOTE: the hold_probe fires in HOLD, where gateFor() is always closed, so its audio is discarded by INV-2 — ' +
-      'see the open question recorded against §6.7.',
+      'No reply.requested while the gate is not open or hold is suspected — with no exceptions. The single ' +
+      'hold probe §6.7 once permitted was removed in v1.3: it fired where the gate is always closed.',
     check(ctx) {
-      let probes = 0;
       for (const s of replay(ctx.log)) {
         const e = s.event;
         if (e.t !== 'reply.requested') continue;
-        if (e.cause === 'hold_probe') {
-          probes++;
-          if (probes > 1) return `seq ${e.seq}: a second hold_probe — §6.7 permits exactly one`;
-          continue;
-        }
         if (s.gate !== 'open') return `seq ${e.seq}: ${e.cause} reply requested while the gate was ${s.gate}`;
         if (s.holdSuspected) return `seq ${e.seq}: ${e.cause} reply requested while hold was suspected`;
       }

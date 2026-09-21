@@ -1,0 +1,57 @@
+# §0 and §0.1: every error class has an automated checker, and "no release
+# proceeds with any of them red". This is what makes the checkers bite: without
+# it, scripts/check-invariants.ts and scripts/check-doc-claims.ts only run when
+# someone remembers to run them.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless. Cancelling it
+# saves Actions minutes rather than spending them on a result nobody will read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not optional. The development and demo hosts are Windows,
+        # and the timer-resolution fix that makes the network profile real
+        # (SSOT §4.5) only takes effect there. A Linux-only CI would never
+        # exercise it.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: test
+        run: pnpm test
+
+      # §17 — INV-11, INV-16, INV-17, INV-21 and the §18 matrix.
+      - name: check-invariants
+        run: pnpm check:invariants
+
+      # §17.3 — the twelve document checks.
+      - name: check-doc-claims
+        run: pnpm check:doc

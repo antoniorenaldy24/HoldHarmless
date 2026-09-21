@@ -251,6 +251,8 @@ function gateFor(channel: Channel, holdSuspected: boolean, navMode: NavMode): Ga
 
 **Rejected alternative: raising `max_silence` during hold to suppress generation structurally.** It conflicts with ADR-009, trading hold safety for conversation quality in the positions judges evaluate.
 
+**Rejected alternative: a third input to `gateFor()` for one sanctioned probe during hold.** Decided in v1.3. §6.7 had permitted a single spoken "are you still there?" after the hold sensitivity ramp — in channel `HOLD`, where this function always returns `closed`, so the probe was billed and never heard. Making it audible would have meant opening the gate on something other than who is listening, and this ADR's whole claim is that nothing else participates. The probe was removed instead; `HOLD_TIMEOUT_MS` is the only exit from a hold that nobody leaves.
+
 ### ADR-008 — The harness holds a real playout queue
 
 **Decision.** The harness does not play frames the instant they arrive. It enqueues them in a `PlayoutQueue` of configured depth (default 200 ms), drains it at the 20 ms frame cadence, and honors two control messages: `clear`, which discards unplayed chunks and returns a `mark` for each, and `mark`, which returns a named acknowledgement when a position in the stream is reached.
@@ -891,7 +893,14 @@ Recovery actions require `createReply` (ADR-022) and are forbidden while the gat
 | `HUMAN` / `READBACK` | 3000 ms | Repeat the read-back | 2× | **`CLOSING`** (escalation) via §8.6 |
 | `HUMAN` / `CLOSING` | 2000 ms | Continue the closing sequence | 2× | **`DONE`** — the Call Model writes the outcome deterministically if unwritten |
 | `TRANSFER` | 4000 ms | Ask whether still connected | 1× | `CLOSED`, `cause: 'unresponsive'` |
-| `HOLD` | 8000 ms | Raise semantic sensitivity by one step | **3 steps, then stop** | At step 3, one `createReply` asking "are you still there?" is permitted **once**; thereafter only `HOLD_TIMEOUT_MS` |
+| `HOLD` | 8000 ms | Raise semantic sensitivity by one step | **3 steps, then stop** | Nothing further. Only `HOLD_TIMEOUT_MS` ends the hold, and the agent never speaks during it (§6.7, ADR-007) |
+
+> **Open questions, found while removing the hold probe (v1.3) and not yet decided.** Two rows above share part of the probe's problem. ADR-022 forbids `createReply` unless the gate is `open`, and `INV-4` enforces it with no exceptions:
+>
+> - **`TRANSFER`** — "ask whether still connected" is spoken where `gateFor()` is always `closed`, so, like the probe, it is billed and inaudible; it also contradicts `TRANSFER.txt`, which tells the agent to wait quietly. The consistent resolution is the one taken for `HOLD`: no spoken action, with `TRANSFER_TIMEOUT_MS` as the exit.
+> - **`IVR` in `dtmf` mode** — "repeat navigation" needs a `createReply` while the gate is `dtmf_only`. Unlike the probe, this reply is useful: its effect is a `send_dtmf` call, not speech, and DTMF passes a `dtmf_only` gate. The consistent resolution is to refine ADR-022's first condition to "the gate admits what the reply is permitted to produce", rather than "the gate is open".
+>
+> §18's "`createReply` permitted" row still reads "yes" for both positions. Neither is exercised until the Call Model implements silence recovery (weeks 2–3), and each changes a decision record, so both are left for the project owner.
 
 **Counters do not advance while `holdSuspected` is true.** This is the single most consequential line in this section. A hold that begins without a spoken cue is confirmed only by the 20-second autocorrelation window. If counters advanced through that window, `EXCHANGE` would reach its limit at about 9 seconds and end the call as unresponsive — every unannounced hold would be fatal, and the harness can produce one by configuration. The counter freezes on suspicion and resumes only when the gate reopens.
 
@@ -1017,9 +1026,7 @@ Every observation carries `signalsAvailable` and `windowsMs`. Without both, a co
 
 **The sensitivity ramp has a floor and a limit.** The `HOLD` recovery action raises semantic sensitivity by one step every 8 seconds. Left unbounded it would run roughly 150 times on a 20-minute hold. It is capped at **three steps**, and `MIN_WEIGHT` never falls below `MIN_WEIGHT_FLOOR`, which is the non-hold baseline.
 
-> **Open question, raised by module 1.5 and not yet decided.** The probe below fires in channel `HOLD`, where `gateFor()` is always `closed` — so the reply it creates is discarded by the transport before anyone can hear it. `INV-4` exempts the probe from the gate condition, but `INV-2` does not exempt its audio, and cannot without making the gate depend on something other than who is listening (ADR-007). As written, the probe is billed and inaudible. The two coherent resolutions are to give `gateFor()` a third input for a single sanctioned probe, or to remove the probe and rely on `HOLD_TIMEOUT_MS`. Recorded here rather than resolved in code, because either one changes a decision record.
-
-**One intermediate escape.** After three ramp steps with no result, the agent is permitted a single `createReply` asking whether anyone is on the line. That is the only speech allowed during hold, it happens at most once, and it is logged as `reply.requested` with cause `hold_probe`.
+**No escape by speech — decided in v1.3.** After three ramp steps with no result, the agent does nothing further; `HOLD_TIMEOUT_MS` is the only exit. Earlier drafts permitted a single `createReply` asking whether anyone was on the line. It fired in channel `HOLD`, where `gateFor()` is always `closed`, so the transport discarded its audio: billed and inaudible. The alternative — letting the gate open for it — is recorded as rejected under ADR-007. The agent is now silent for the whole of every hold, without exception, and `INV-4` holds with no exemptions.
 
 **A metric that shows both criteria failing together.** `hold_exit_unknown_duration_ms` measures how long the semantic layer returned `UNKNOWN` while the far end was speaking.
 
@@ -1808,8 +1815,8 @@ type CallEvent = { seq: number; callId: string; at: string } & (
   | { t: 'network.profile_changed'; from: NetworkProfileName; to: NetworkProfileName }
   | { t: 'prompt.loaded';       files: string[]; hedged: boolean;
                                 disclosureIncluded: boolean; substitutions: string[] }
-  | { t: 'reply.requested';     cause: 'silence_recovery' | 'escalation_instruction'
-                                     | 'hold_probe'; instructions?: string }
+  | { t: 'reply.requested';     cause: 'silence_recovery' | 'escalation_instruction';
+                                instructions?: string }
   | { t: 'disclosure.delivered'; partyIndex: number; quote: string }
   | { t: 'party.changed';       reason: 'transfer' | 'long_hold' | 'ivr_return';
                                 newIndex: number }
@@ -2244,7 +2251,7 @@ export interface SessionConfig {
   interruptionDelayMs?: number;   // omitted unless ENABLE_INTERRUPTION_DELAY
 }
 
-export type ReplyCause = 'silence_recovery' | 'escalation_instruction' | 'hold_probe';
+export type ReplyCause = 'silence_recovery' | 'escalation_instruction';   // no hold probe (§6.7)
 
 export interface AgentSession {
   connect(initial: SessionConfig & {
@@ -2450,7 +2457,7 @@ export interface HarnessSession {
 | `CLASSIFIER_MARGIN` | `0.15` | |
 | `MIN_WEIGHT` | tuned per §6.7 | Lowest value giving zero false hold exits |
 | `MIN_WEIGHT_FLOOR` | `= MIN_WEIGHT` baseline | The ramp never goes below it |
-| `HOLD_RAMP_MAX_STEPS` | `3` | Then one probe, then only the hold timeout |
+| `HOLD_RAMP_MAX_STEPS` | `3` | Then nothing further; only `HOLD_TIMEOUT_MS` ends the hold (§6.7) |
 | `PARTY_CONTINUITY_MS` | `5000` | Measured from `holdSuspectedAt` |
 | `DISCLOSURE_RESET_HOLD_MS` | `120000` | |
 | `HOLD_TIMEOUT_MS` | `1200000` | 20 minutes |
@@ -2595,7 +2602,7 @@ Run on every transition, at call end, and on every fixture replay. A violation e
 | **INV-1** | `gateIntent` always equals `gateFor(channel, holdSuspected, navMode)`; it is never assigned independently | transition | |
 | **INV-2** | No `reply.audio` frame reaches the transport while `gateIntent ≠ 'open'`, except DTMF frames while `dtmf_only` | transition | |
 | **INV-3** | Every `gate.changed` to `closed` is followed by a `clear` within 50 ms, and the playout queue reports zero unplayed agent frames afterwards | transition | |
-| **INV-4** | No `reply.requested` while `gateIntent ≠ 'open'` or `holdSuspected` is true, except the single `hold_probe` permitted by §6.7 | transition | |
+| **INV-4** | No `reply.requested` while `gateIntent ≠ 'open'` or `holdSuspected` is true — **no exceptions** since v1.3, when the §6.7 hold probe was removed | transition | |
 | **INV-5** | `rePromptCounts` never advances while `holdSuspected` is true, and the after-limit action in §5.7 executes exactly at the limit | transition | |
 | **INV-6** | **Both directions.** Every return to `HUMAN` from `HOLD` or `TRANSFER` without assured continuity loads `PARTY_HEDGE.txt`; and no `prompt.loaded` ever contains both `PARTY_HEDGE.txt` and `DISCLOSURE.txt` | transition | **K-2** |
 | **INV-7** | At the end of every call reaching `HUMAN`, `disclosuresDelivered ≥ parties_used` from harness telemetry, using the §7.6 detector | call-end | **K-2** |
@@ -2670,7 +2677,7 @@ A single symbol for both "checked and irrelevant" and "not yet examined" is what
 | **`PARTY_HEDGE` can be prepended** | — | — | — | **yes** | **yes** | **yes** |
 | **`DISCLOSURE.txt` can be emitted** | — | — | — | **yes** | **yes** | **yes** |
 | **Silence action** | repeat nav | raise sensitivity, max 3 | ask ×1 | opening or offer ×2 | repeat ×2 | continue ×2 |
-| **After-limit target** | `CLOSED` unresponsive | one probe, then hold timeout | `CLOSED` unresponsive | `CLOSED` unresponsive | `CLOSING` escalation | `DONE` |
+| **After-limit target** | `CLOSED` unresponsive | nothing further; hold timeout only | `CLOSED` unresponsive | `CLOSED` unresponsive | `CLOSING` escalation | `DONE` |
 | **Counters freeze on `holdSuspected`** | yes | — | yes | yes | yes | yes |
 | **Phase timeout** | — | — | — | 480 s human time | 180 s | 120 s |
 | **`interrupt_response`** | `false` | `false` | `false` | `true` | `true` | `true` |
@@ -2678,7 +2685,7 @@ A single symbol for both "checked and irrelevant" and "not yet examined" is what
 | **`transcription_mode`** | `min_latency` | `balanced` | `balanced` | `max_accuracy` | `max_accuracy` | `balanced` |
 | **Tools permitted** | 1 | — | — | 5 | 4 | 4 |
 | **Writes an outcome** | — | — | — | — | — | **yes** |
-| **`createReply` permitted** | yes | once, `hold_probe` only | yes | yes | yes | yes |
+| **`createReply` permitted** | yes | **no** — the gate is always closed (§6.7) | yes | yes | yes | yes |
 | **Playout queue active** | yes | yes, cleared on entry | yes | yes | yes | yes |
 | **Has a §5.6 row** | yes | yes | yes | yes | yes | yes |
 | **Has a §5.7 row** | yes | yes | yes | yes | yes | yes |

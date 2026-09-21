@@ -98,10 +98,12 @@ describe('each invariant fails on a log crafted to break it', () => {
     assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'silence_recovery' })), 'INV-4');
   });
 
-  test('INV-4 — a second hold probe', () => {
+  test('INV-4 — no cause is exempt during hold, escalation included', () => {
+    // Until v1.3 one 'hold_probe' was exempt. It was removed (§6.7), and the
+    // type no longer admits that cause — so the only way to test the old hole is
+    // to show that every remaining cause is refused.
     const i = indexOf(APPROVED, (b) => b.t === 'channel.changed' && b.to === 'HOLD');
-    const probe: CallEventBody = { t: 'reply.requested', cause: 'hold_probe' };
-    assertFails(ctxOf(insertAfter(APPROVED, i, probe, probe)), 'INV-4');
+    assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'escalation_instruction' })), 'INV-4');
   });
 
   test('INV-5 — three silence re-prompts where §5.7 allows two', () => {

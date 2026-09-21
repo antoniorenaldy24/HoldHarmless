@@ -260,7 +260,12 @@ export type CallEventBody =
     }
   | {
       t: 'reply.requested';
-      cause: 'silence_recovery' | 'escalation_instruction' | 'hold_probe';
+      /**
+       * 'hold_probe' was removed in v1.3 by decision (§6.7): it fired in HOLD,
+       * where the gate is always closed, so it was billed and inaudible. Its
+       * absence from this union is what now makes logging one impossible.
+       */
+      cause: 'silence_recovery' | 'escalation_instruction';
       instructions?: string;
     }
   | { t: 'disclosure.delivered'; partyIndex: number; quote: string }

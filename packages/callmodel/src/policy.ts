@@ -23,8 +23,14 @@ export type AfterLimit =
   | { kind: 'close'; cause: 'unresponsive' }
   | { kind: 'phase'; to: 'CLOSING'; closingKind: ClosingKind }
   | { kind: 'phase'; to: 'DONE' }
-  /** §6.7: after three ramp steps, one createReply probe; thereafter only HOLD_TIMEOUT_MS. */
-  | { kind: 'hold_probe_once' };
+  /**
+   * No further action: the channel's own timeout is the only exit. Used by HOLD
+   * after its three ramp steps. It replaced 'hold_probe_once' in v1.3, when the
+   * one spoken probe during hold was removed (§6.7): it fired where the gate is
+   * always closed, and making it audible would have tied the gate to something
+   * other than who is listening (ADR-007).
+   */
+  | { kind: 'await_timeout' };
 
 export type PositionPolicy = {
   interruptResponse: boolean;
@@ -76,9 +82,9 @@ const holdPolicy: PositionPolicy = {
   transcriptionMode: 'balanced',
   silenceTimeoutMs: 8000,
   rePromptLimit: 3,
-  afterLimit: { kind: 'hold_probe_once' },
+  afterLimit: { kind: 'await_timeout' },
   tools: [],
-  silenceAction: 'raise semantic sensitivity one step (max 3), then one hold_probe',
+  silenceAction: 'raise semantic sensitivity one step (max 3), then nothing until HOLD_TIMEOUT_MS',
 };
 
 /**
