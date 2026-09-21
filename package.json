@@ -11,7 +11,8 @@
     "test": "node --import tsx --test packages/*/test/*.test.ts",
     "check:invariants": "tsx scripts/check-invariants.ts",
     "check:doc": "tsx scripts/check-doc-claims.ts",
-    "check": "pnpm typecheck && pnpm test && pnpm check:invariants && pnpm check:doc"
+    "check": "pnpm typecheck && pnpm test && pnpm check:invariants && pnpm check:doc",
+    "test:ci": "node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/gh-annotations.mjs --test-reporter-destination=stdout packages/*/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

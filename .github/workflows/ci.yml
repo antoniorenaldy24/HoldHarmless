@@ -30,11 +30,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -45,8 +45,10 @@ jobs:
       - name: typecheck
         run: pnpm typecheck
 
+      # test:ci adds a reporter that turns each failing test into a public
+      # annotation. Job logs need a token to read; annotations do not.
       - name: test
-        run: pnpm test
+        run: pnpm test:ci
 
       # §17 — INV-11, INV-16, INV-17, INV-21 and the §18 matrix.
       - name: check-invariants
