@@ -1,0 +1,42 @@
+{
+  "_note": "INV-12: every value here is synthetic. `value` is what capture_auth_number must produce; `say` is the TTS text that produces the audio. Numbers are written as words so the voice reads them digit by digit ('four, seven, two', never 'four hundred seventy-two').",
+  "_carrier_phrases": "Each line opens with a natural carrier phrase. A bare stream of digits would be easier for the model and less like a real call — A-24 is about capturing a number the moment a representative states it, so the number has to arrive inside a sentence.",
+  "_pacing": "Every digit is comma-separated, which is what makes the voice pause between them. Combined with TTS_RATE this is what keeps digits from slurring. A slurred digit shows up as a CAPTURE failure in E-AUTH and sends you debugging ADR-020 for a rendering problem.",
+  "_variable": "The ONLY difference between the two groups is the NATO 'as in' phrase. Pacing is identical in both, so the experiment varies one thing rather than two.",
+
+  "spoken": [
+    { "value": "A472-91",     "say": "Okay, the authorization number is A, four, seven, two, dash, nine, one." },
+    { "value": "PA0084417",   "say": "Your auth number is P, A, zero, zero, eight, four, four, one, seven." },
+    { "value": "AUTH-2291-C", "say": "That's approved. The number is A, U, T, H, dash, two, two, nine, one, dash, C." },
+    { "value": "B884-20",     "say": "Let me give you the authorization number. It's B, eight, eight, four, dash, two, zero." },
+    { "value": "X09-4471",    "say": "The authorization number is X, zero, nine, dash, four, four, seven, one." },
+    { "value": "PA5520918",   "say": "Alright, your auth number is P, A, five, five, two, zero, nine, one, eight." },
+    { "value": "C4471-08",    "say": "The number on file is C, four, four, seven, one, dash, zero, eight." },
+    { "value": "AUTH-9930-B", "say": "Authorization number A, U, T, H, dash, nine, nine, three, zero, dash, B." },
+    { "value": "D220-77",     "say": "Okay, I have it. The number is D, two, two, zero, dash, seven, seven." },
+    { "value": "PA0071244",   "say": "Your authorization number is P, A, zero, zero, seven, one, two, four, four." },
+    { "value": "E551-39",     "say": "That's approved under E, five, five, one, dash, three, nine." },
+    { "value": "AUTH-4102-A", "say": "The auth number is A, U, T, H, dash, four, one, zero, two, dash, A." },
+    { "value": "F773-16",     "say": "Let me read that out. F, seven, seven, three, dash, one, six." },
+    { "value": "PA9928301",   "say": "The authorization number is P, A, nine, nine, two, eight, three, zero, one." },
+    { "value": "G604-82",     "say": "Okay, you're all set. The number is G, six, zero, four, dash, eight, two." }
+  ],
+
+  "spelled": [
+    { "value": "H119-45",     "say": "The authorization number is H as in hotel, one, one, nine, dash, four, five." },
+    { "value": "PA0043312",   "say": "Your auth number is P as in papa, A as in alpha, zero, zero, four, three, three, one, two." },
+    { "value": "AUTH-7781-D", "say": "That's A as in alpha, U as in uniform, T as in tango, H as in hotel, dash, seven, seven, eight, one, dash, D as in delta." },
+    { "value": "J356-90",     "say": "Let me spell that for you. J as in juliet, three, five, six, dash, nine, zero." },
+    { "value": "K802-13",     "say": "The number is K as in kilo, eight, zero, two, dash, one, three." },
+    { "value": "PA6610724",   "say": "Your authorization number is P as in papa, A as in alpha, six, six, one, zero, seven, two, four." },
+    { "value": "L477-28",     "say": "That's L as in lima, four, seven, seven, dash, two, eight." },
+    { "value": "AUTH-3390-E", "say": "Authorization A as in alpha, U as in uniform, T as in tango, H as in hotel, dash, three, three, nine, zero, dash, E as in echo." },
+    { "value": "M915-64",     "say": "The auth number is M as in mike, nine, one, five, dash, six, four." },
+    { "value": "PA0019876",   "say": "Okay, it's P as in papa, A as in alpha, zero, zero, one, nine, eight, seven, six." },
+    { "value": "N238-51",     "say": "Let me spell it out. N as in november, two, three, eight, dash, five, one." },
+    { "value": "AUTH-6624-F", "say": "That's A as in alpha, U as in uniform, T as in tango, H as in hotel, dash, six, six, two, four, dash, F as in foxtrot." },
+    { "value": "P740-09",     "say": "The authorization number is P as in papa, seven, four, zero, dash, zero, nine." },
+    { "value": "PA3305519",   "say": "Your number is P as in papa, A as in alpha, three, three, zero, five, five, one, nine." },
+    { "value": "Q162-83",     "say": "And that's Q as in quebec, one, six, two, dash, eight, three." }
+  ]
+}

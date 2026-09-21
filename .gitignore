@@ -1,0 +1,31 @@
+# Secrets — §14 pre-flight: the key is present locally, absent from the repository
+.env
+.env.local
+*.key
+
+# Fixtures contain real consented voices — kept outside any public repository (§6.6, §16.4)
+packages/fixtures/
+hh-day0/logs/
+hh-day0/audio/
+!hh-day0/logs/.gitkeep
+!hh-day0/audio/.gitkeep
+
+# Rendered harness audio assets (regenerate with scripts/render-assets.ts, §10.2)
+apps/ivr-harness/assets/
+
+# Event logs — synthetic, but noisy (§9.3)
+*.jsonl
+!hh-day0/results/*.jsonl
+
+# Build output
+node_modules/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

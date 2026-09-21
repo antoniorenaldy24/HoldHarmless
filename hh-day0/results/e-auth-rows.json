@@ -1,0 +1,79 @@
+{
+  "rows": [
+    {
+      "i": 1,
+      "want": "A472-91",
+      "got": "A472-91",
+      "match": true,
+      "class": "exact",
+      "kind": "spoken"
+    },
+    {
+      "i": 2,
+      "want": "PA0084417",
+      "got": "AUTH-2291-C",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    },
+    {
+      "i": 3,
+      "want": "AUTH-2291-C",
+      "got": "B884-20",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    },
+    {
+      "i": 4,
+      "want": "B884-20",
+      "got": "X09-4471",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    },
+    {
+      "i": 5,
+      "want": "X09-4471",
+      "got": "C4471-08",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    },
+    {
+      "i": 6,
+      "want": "PA5520918",
+      "got": "PA0084417",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    },
+    {
+      "i": 7,
+      "want": "C4471-08",
+      "got": "PA5520918",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    },
+    {
+      "i": 8,
+      "want": "AUTH-9930-B",
+      "got": "AUTH-9930-B",
+      "match": true,
+      "class": "exact",
+      "kind": "spoken"
+    },
+    {
+      "i": 9,
+      "want": "D220-77",
+      "got": "H-4102-A",
+      "match": false,
+      "class": "capture",
+      "kind": "spoken"
+    }
+  ],
+  "exact": 2,
+  "rate": 0.06666666666666667,
+  "formattingFailures": 0
+}

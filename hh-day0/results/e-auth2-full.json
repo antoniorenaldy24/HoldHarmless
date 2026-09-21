@@ -1,0 +1,220 @@
+{
+  "rows": [
+    {
+      "value": "A472-91",
+      "got": "A472-91",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA0084417",
+      "got": "PA0084417",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "AUTH-2291-C",
+      "got": "AUTH-2291-C",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "B884-20",
+      "got": "B884-20",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "X09-4471",
+      "got": "X09-4471",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA5520918",
+      "got": "PA5520918",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "C4471-08",
+      "got": "C4471-08",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "AUTH-9930-B",
+      "got": "AUTH-9930-B",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "D220-77",
+      "got": "D220-77",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA0071244",
+      "got": "PA00071244",
+      "kind": "spoken",
+      "class": "capture",
+      "extraCaptures": 0
+    },
+    {
+      "value": "E551-39",
+      "got": "E551-39",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "AUTH-4102-A",
+      "got": "AUTH-4102-A",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "F773-16",
+      "got": "F773-16",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA9928301",
+      "got": "PA9928301",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "G604-82",
+      "got": "G604-82",
+      "kind": "spoken",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "H119-45",
+      "got": "H119-45",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA0043312",
+      "got": "PA0043312",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "AUTH-7781-D",
+      "got": "AUTH-7781-D",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "J356-90",
+      "got": "J356-90",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "K802-13",
+      "got": "K802-13",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA6610724",
+      "got": "PA6610724",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "L477-28",
+      "got": "L477-28",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "AUTH-3390-E",
+      "got": "AUTH-33190-E",
+      "kind": "spelled",
+      "class": "capture",
+      "extraCaptures": 0
+    },
+    {
+      "value": "M915-64",
+      "got": "M915-64",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA0019876",
+      "got": "PA0019876",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "N238-51",
+      "got": "N238-51",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "AUTH-6624-F",
+      "got": "AUTH-6624-F",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "P740-09",
+      "got": "P740-09",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "PA3305519",
+      "got": "PA3305519",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    },
+    {
+      "value": "Q162-83",
+      "got": "Q162-83",
+      "kind": "spelled",
+      "class": "exact",
+      "extraCaptures": 0
+    }
+  ],
+  "exact": 28,
+  "rate": 0.9333333333333333,
+  "formatting": 0,
+  "noCapture": 0,
+  "captureErr": 2,
+  "pass": false
+}

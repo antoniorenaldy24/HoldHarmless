@@ -1,0 +1,21 @@
+{
+  "name": "hh-day0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway Day-0 scaffolding for HoldHarmless. Output is notes written back into the SSOT, not code that gets reused.",
+  "scripts": {
+    "audio": "node scripts/make-audio.mjs",
+    "e0": "node e0.mjs",
+    "e-reply": "node e-reply.mjs",
+    "e2": "node e2.mjs",
+    "e3": "node e3.mjs",
+    "e-auth": "node e-auth.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20.12"
+  }
+}
