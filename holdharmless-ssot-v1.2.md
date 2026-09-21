@@ -777,6 +777,10 @@ The rule generalizes: **a phase boundary must correspond to something a tool can
 
 **Phase is untouched by every row in this table**, except the one marked. That is the whole design.
 
+**The marked side effect applies to every entry into `HUMAN`, not only `IVR → HUMAN`.** The table annotates the `IVR → HUMAN` row alone, but the producer is §5.4's first row — "channel became `HUMAN` for the first time" — whichever channel it came from. The distinction is not academic. The most common path in the whole system is `IVR → HOLD → HUMAN`: a queue hold answered by a representative. Read literally, the annotation would leave that call in `HUMAN/NOT_STARTED`, a position with no policy, no tools, and no prompt, and the agent would be unable to act at all.
+
+Two follow-ups fire in the **same handler** as the channel change, so the intermediate position is never a resting state: entering `HUMAN` while `NOT_STARTED` moves the phase to `EXCHANGE`, and entering `CLOSED` moves it to `DONE`. `settle()` in `packages/callmodel` is the single implementation of both, and the Call Model must apply them atomically — were it ever not to, the intermediate would become reachable and need a policy of its own.
+
 ### 5.4 Phase transitions
 
 | From → To | Producer | Side effects |
@@ -836,13 +840,24 @@ Configuration is a function of `(channel, phase)`.
 | channel | phase | Gate | `interrupt_response` | `interruption_delay` | `transcription_mode` | Tools permitted |
 |---|---|---|---|---|---|---|
 | `DIALING` | `NOT_STARTED` | closed | — | — | `balanced` | — |
-| `IVR` | `NOT_STARTED` | `dtmf_only` / `open` | `false` | — | `min_latency` | `send_dtmf` |
-| `HOLD` | any | **closed** | `false` | — | `balanced` | **none** |
-| `TRANSFER` | any | closed | `false` | — | `balanced` | **none** |
+| `IVR` | any working phase | `dtmf_only` / `open` | `false` | — | `min_latency` | `send_dtmf` |
+| `HOLD` | any working phase | **closed** | `false` | — | `balanced` | **none** |
+| `TRANSFER` | `EXCHANGE`, `READBACK`, `CLOSING` | closed | `false` | — | `balanced` | **none** |
 | `HUMAN` | `EXCHANGE` | open | `true` | **700 ms** | **`max_accuracy`** | `get_auth_request`, `capture_auth_number`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
 | `HUMAN` | `READBACK` | open | `true` | **800 ms** | **`max_accuracy`** | `confirm_readback`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
 | `HUMAN` | `CLOSING` | open | `true` | — | `balanced` | `record_outcome`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
+| any but `CLOSED` | `DONE` | derived | `false` | — | `balanced` | **none** — and no silence recovery |
 | `CLOSED` | `DONE` | closed | — | — | — | — |
+
+**Three rows above were corrected in v1.3 by `reachablePositions()` in `packages/callmodel`**, which computes the reachable pairs by breadth-first search over §5.3 and §5.4 rather than listing them by hand. It found eight reachable positions with no policy and one policy for an unreachable position:
+
+| Correction | Why it was reachable, or not |
+|---|---|
+| **`IVR` in `EXCHANGE`, `READBACK`, `CLOSING`** | `HUMAN → HOLD → IVR` is a path through §5.3's own rows, and `INV-13` keeps the phase riding along. A representative says "hold on" and the agent lands in another department's menu. §18 had asserted this could not occur. The remedy is the reasoning §18 already applied to `HOLD` and `TRANSFER`: these channels preserve the current phase, so their policy is channel-driven |
+| **Every channel with `DONE`** | `CLOSING → DONE` is produced by `reply.done` while a person is still on the line (ADR-015), and the line stays open until the hangup completes. The channel can still move in that window. The policy does nothing — no tools, and above all no silence recovery, which would have the agent start a new turn on a closed call. The Call Model hangs up on entering `DONE`; the exit is the ordinary `* → CLOSED` row |
+| **`TRANSFER` in `NOT_STARTED` removed** | §5.6 said `TRANSFER` applied to "any" phase. `TRANSFER` is entered only through `notify_transfer`, a tool permitted only once a human has answered — by which time the phase has left `NOT_STARTED`. A row for an unreachable position is a claim that it can occur |
+
+This is the process §0 describes working as intended. The document was reviewed by hand and the gap survived; a computed search found it the first time it ran.
 
 **`interrupt_response` is `true` everywhere a human is present.** `READBACK` exists to catch mismatches, and mismatches arrive as interruptions — "no, that's four-seven-*three*" — because nobody waits for a robot to finish a number they already know is wrong. Disabling barge-in there would discard the signal the phase was built to receive. Closing faces "oh wait, one more thing." Protection against backchannel comes from semantic barge-in (§7.5) and `interruption_delay`, not from disabling interruption.
 
@@ -2119,13 +2134,18 @@ export const TOOL_EFFECT: Record<ToolName, {
   escalate_to_human:   { phase: 'CLOSING' },
 };
 
+/** DERIVED from POSITION_POLICY, never declared beside it — §8.7's one source of truth. */
 export const TOOL_ALLOWLIST: Record<string, readonly ToolName[]>;   // by position id
 
 export function positionId(channel: Channel, phase: Phase): string;
 export function gateFor(channel: Channel, holdSuspected: boolean, navMode: NavMode): GateIntent;
 
+/**
+ * No `gate` field. An earlier draft had one; ADR-007 says the gate "is never
+ * stored, never set by hand", and a stored copy beside gateFor() is two sources
+ * for one fact. INV-1 exists because two sources drift.
+ */
 export interface PositionPolicy {
-  gate: GateIntent;
   interruptResponse: boolean;
   interruptionDelayMs?: number;
   transcriptionMode: 'min_latency' | 'balanced' | 'max_accuracy';
@@ -2607,7 +2627,7 @@ A single symbol for both "checked and irrelevant" and "not yet examined" is what
 | **Has a §5.6 row** | yes | yes | yes | yes | yes | yes |
 | **Has a §5.7 row** | yes | yes | yes | yes | yes | yes |
 | **Has a §16 metric** | `dtmf_*` | `hold_*` | `disclosure_*` | `perceived_*`, `over_disclosure_*` | `task_success`, `auth_number_*` | `outcome_before_closing` |
-| **Why some combinations are `—`** | `IVR` with a later phase cannot occur: phase leaves `NOT_STARTED` only when the channel becomes `HUMAN` | `HOLD` and `TRANSFER` preserve whatever phase was current; policy is channel-driven there | same | — | — | — |
+| **Why some combinations are `—`** | **Corrected in v1.3.** This cell previously read "`IVR` with a later phase cannot occur". It can, via `HUMAN → HOLD → IVR`; the policy is channel-driven, as for `HOLD` (§5.6) | `HOLD` and `TRANSFER` preserve whatever phase was current; policy is channel-driven there | same | — | — | — |
 
 The last four rows are completeness checks. A `?` in any of them fails the build.
 

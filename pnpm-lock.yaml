@@ -48,6 +48,12 @@ importers:
 
   packages/audio: {}
 
+  packages/callmodel:
+    dependencies:
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+
   packages/events: {}
 
   packages/transport:
