@@ -1015,7 +1015,7 @@ Every observation carries `signalsAvailable` and `windowsMs`. Without both, a co
 
 **What calibration can and cannot prove.** In `BOT_REP` mode the IVR and the representative are both rendered speech, so the classifier learns to separate rendered speech from rendered speech. That is healthy — it forces reliance on conversational structure. The risk runs the other way: `HUMAN_REP` on stage is a live person whose acoustics are absent from the calibration set. Hence genuine human turns in week 2, not week 4.
 
-**Consent.** Fixtures contain real voices. Obtain consent and keep `packages/fixtures` outside any public repository.
+**Consent.** Fixtures contain real voices. Obtain consent and keep fixture data — `packages/fixtures/data/` — outside any public repository. (v1.3: the recorder and player code is tracked; it holds no voice, and code kept out of the repository is code CI never runs. A test fails if anything under `packages/fixtures` other than code is tracked, or if `data/` stops being ignored.)
 
 ### 6.7 Hold-exit detection: one lever, two opposing criteria
 
@@ -2061,7 +2061,7 @@ holdharmless/
 │   ├── prompts/                # prompt files, promptFor, renderer
 │   ├── detectors/              # disclosure and closing detectors (§7.6)
 │   ├── invariants/             # INV-1 … INV-21
-│   └── fixtures/               # recorder and player — OUTSIDE the public repo
+│   └── fixtures/               # recorder and player; fixture DATA in fixtures/data/ is OUTSIDE the public repo
 └── scripts/
     ├── render-assets.ts        # offline TTS render of harness audio
     ├── calibrate.ts
@@ -2393,6 +2393,12 @@ export interface FixturePlayer {
 
 `Fixture.networkProfile` is recorded because a fixture captured under `CLEAN` cannot be compared with one captured under `TELEPHONY`, and the difference is invisible in the audio alone.
 
+**As built in v1.3 (module 1.9), three departures from the sketch above, each for a reason:**
+
+- **Audio is on the timeline, not in `audio: Uint8Array[]`.** Audio with no timing cannot be aligned with the session messages it arrived between, which is the alignment calibration (§6.6) needs. A fixture is one timeline of `server` and `client` messages (verbatim, both directions), `far_end_audio` and `agent_audio` frames, and `timer` firings, in milliseconds from the start. `audioFrames()` recovers the array view. The fixture also carries the `AuthRequest`, and save and load both refuse one that fails `INV-12`.
+- **Timer firings are recorded, because the wall clock is an input.** The first player recomputed timer times from the timeline and failed about one run in 80: when the event loop stalled, a message was recorded after a timer was due yet handled before it, live, and the replay fired the timer first. The recorder now writes each firing onto the timeline, and the default replay mode (`recorded`) fires a timer there and nowhere else; a replayed pipeline that arms or cancels timers differently is reported as a divergence. A second mode, `virtual`, recomputes timers on a virtual clock — for asking what a *changed* pipeline would do, where reproducing the live run is not the question.
+- **`FixturePlayer.play` takes a pipeline, not three sinks.** The classifiers and the call model do not exist before week 2. A pipeline sees the world only through a clock, a timer, and an event sink, which is also what makes a replay unable to make an API call; the classifiers and call model will be one pipeline. "Identical" means every event field in order, `seq` included, except `at`, which live is set by the wall clock.
+
 ### 12.9 `apps/core`
 
 ```typescript
@@ -2510,7 +2516,7 @@ pnpm --filter dashboard dev
 - [ ] Harness audio assets rendered (`pnpm render-assets`)
 - [ ] `NETWORK_PROFILE=TELEPHONY` for anything whose numbers will be reported
 - [ ] Sessions terminated with `session.end`, never a bare socket close
-- [ ] `packages/fixtures` excluded from the public repository
+- [ ] `packages/fixtures/data/` excluded from the public repository (enforced by a test)
 - [ ] `check-invariants.ts` and `check-doc-claims.ts` green in CI
 - [ ] For a live demo: E3 re-measured on the host being demoed from (ADR-003)
 - [ ] **On Windows:** both processes log `timer resolution: raised from 15.625 ms to 1 ms` at startup. Without it the network profile is not applied and no latency figure from that run may be reported (§4.5)

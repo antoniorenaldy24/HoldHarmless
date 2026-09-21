@@ -3,8 +3,10 @@
 .env.local
 *.key
 
-# Fixtures contain real consented voices — kept outside any public repository (§6.6, §16.4)
-packages/fixtures/
+# Fixture DATA contains real consented voices — kept outside any public repository
+# (§6.6). The recorder/player code in packages/fixtures/src is tracked; a test
+# fails if anything else under packages/fixtures is.
+packages/fixtures/data/
 hh-day0/logs/
 hh-day0/audio/
 !hh-day0/logs/.gitkeep

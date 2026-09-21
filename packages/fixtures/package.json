@@ -1,0 +1,15 @@
+{
+  "name": "@holdharmless/fixtures",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@holdharmless/events": "workspace:*",
+    "@holdharmless/invariants": "workspace:*"
+  },
+  "devDependencies": {
+    "@holdharmless/agent": "workspace:*",
+    "@holdharmless/detectors": "workspace:*"
+  }
+}

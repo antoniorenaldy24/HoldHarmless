@@ -221,6 +221,22 @@ importers:
 
   packages/events: {}
 
+  packages/fixtures:
+    dependencies:
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+      '@holdharmless/invariants':
+        specifier: workspace:*
+        version: link:../invariants
+    devDependencies:
+      '@holdharmless/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@holdharmless/detectors':
+        specifier: workspace:*
+        version: link:../detectors
+
   packages/invariants:
     dependencies:
       '@holdharmless/callmodel':
