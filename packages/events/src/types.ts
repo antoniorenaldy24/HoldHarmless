@@ -239,6 +239,19 @@ export type CallEventBody =
       atMs: number;
     }
   | {
+      /**
+       * Added in v1.3. hold.suspected had no counterpart, so the moment §5.5
+       * clears suspicion — HUMAN confirmed at N=2, or the channel confirming
+       * HOLD — was recorded only as a side field of gate.changed. That made the
+       * gate derivation's second input observable solely through the very event
+       * INV-1 exists to audit: delete a gate.changed and its input vanished with
+       * it, leaving a stale gate that looked consistent. Found by the INV-1
+       * mutation test.
+       */
+      t: 'hold.cleared';
+      reason: 'human_confirmed' | 'hold_confirmed' | 'reconnected';
+    }
+  | {
       t: 'prompt.loaded';
       files: string[];
       hedged: boolean;
@@ -285,6 +298,38 @@ export type CallEventBody =
       detail: string;
       frameCount?: number;
       durationMs?: number;
+      /**
+       * Added in v1.3. INV-15 pairs a safety.violation with a tool.rejected "for
+       * the same toolCallId", but the event had no such field, so the invariant
+       * named a mechanism that could not exist (K-4).
+       */
+      toolCallId?: string;
+    }
+  | {
+      /**
+       * Added in v1.3. The context summary for an escalation, whoever wrote it.
+       *
+       * INV-9 accepts "a valid escalate_to_human call, OR a deterministic §8.6
+       * summary" as evidence, and §8.1 says the summary "lives in the event log
+       * keyed by callId". No event carried the deterministic one, so INV-9 could
+       * only ever check half of what it names. Emitting one event for both paths
+       * also gives panel 8 a single thing to read.
+       */
+      t: 'escalation.summary';
+      source: 'model' | 'deterministic';
+      urgency: 'EXPEDITED' | 'Routine';
+      summary: string;
+    }
+  | {
+      /**
+       * Added in v1.3. INV-16 requires the network profile "in force" for every
+       * transition and metric, and §19.3 can switch it mid-call. Derived from
+       * call.started plus this event, rather than stamped onto every event —
+       * the same reason the gate is derived rather than stored.
+       */
+      t: 'network.profile_changed';
+      from: NetworkProfileName;
+      to: NetworkProfileName;
     }
   | { t: 'invariant.violated'; id: string; detail: string }
   | { t: 'harness.telemetry'; metric: string; value: number; detail?: string }

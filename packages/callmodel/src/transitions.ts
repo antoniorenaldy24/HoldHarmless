@@ -144,19 +144,32 @@ export type Edge = {
   via: string;
 };
 
-/** Every edge leaving a position, after atomic follow-ups are applied. */
-export function edgesFrom(channel: Channel, phase: Phase): Edge[] {
+export type TransitionTables = {
+  channel: readonly ChannelTransition[];
+  phase: readonly PhaseTransition[];
+};
+
+export const TABLES: TransitionTables = { channel: CHANNEL_TRANSITIONS, phase: PHASE_TRANSITIONS };
+
+/**
+ * Every edge leaving a position, after atomic follow-ups are applied.
+ *
+ * Takes the tables as a parameter so the static checkers can be proved to FAIL:
+ * acceptance 1.6 requires check-invariants to fail on a deliberately removed
+ * producer, which is only testable if a mutated table can be handed in.
+ */
+export function edgesFrom(channel: Channel, phase: Phase, tables: TransitionTables = TABLES): Edge[] {
   const here = positionId(channel, phase);
   const out: Edge[] = [];
 
-  for (const t of CHANNEL_TRANSITIONS) {
+  for (const t of tables.channel) {
     if (t.from !== '*' && t.from !== channel) continue;
     if (t.to === channel) continue;
     const next = settle(t.to, phase);
     out.push({ from: here, to: positionId(next.channel, next.phase), kind: 'channel', producer: t.producer, via: t.via });
   }
 
-  for (const t of PHASE_TRANSITIONS) {
+  for (const t of tables.phase) {
     if (t.from !== '*' && t.from !== phase) continue;
     if (t.inChannel !== undefined && t.inChannel !== channel) continue;
     // "any -> CLOSING" does not apply from NOT_STARTED: its producer is a tool,
@@ -174,13 +187,13 @@ export function edgesFrom(channel: Channel, phase: Phase): Edge[] {
 export const START: { channel: Channel; phase: Phase } = { channel: 'DIALING', phase: 'NOT_STARTED' };
 
 /** Breadth-first search from the start position over both tables. */
-export function reachablePositions(): Set<PositionId> {
+export function reachablePositions(tables: TransitionTables = TABLES): Set<PositionId> {
   const seen = new Set<PositionId>([positionId(START.channel, START.phase)]);
   const queue: { channel: Channel; phase: Phase }[] = [START];
 
   while (queue.length > 0) {
     const { channel, phase } = queue.shift()!;
-    for (const edge of edgesFrom(channel, phase)) {
+    for (const edge of edgesFrom(channel, phase, tables)) {
       if (seen.has(edge.to)) continue;
       seen.add(edge.to);
       const [c, p] = edge.to.split('/') as [Channel, Phase];
@@ -191,10 +204,10 @@ export function reachablePositions(): Set<PositionId> {
 }
 
 /** A terminal position is one with no way out. Only CLOSED/DONE may be terminal. */
-export function deadEnds(): PositionId[] {
-  return [...reachablePositions()].filter((id) => {
+export function deadEnds(tables: TransitionTables = TABLES): PositionId[] {
+  return [...reachablePositions(tables)].filter((id) => {
     if (id === 'CLOSED/DONE') return false;
     const [c, p] = id.split('/') as [Channel, Phase];
-    return edgesFrom(c, p).filter((e) => e.to !== id).length === 0;
+    return edgesFrom(c, p, tables).filter((e) => e.to !== id).length === 0;
   });
 }

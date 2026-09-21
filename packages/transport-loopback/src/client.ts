@@ -150,7 +150,7 @@ export class LoopbackTransport implements CallTransport {
   applyGate(intent: GateIntent): void {
     const previous = this.#gate;
     this.#gate = intent;
-    // The contract on CallTransport.applyGate: leaving 'open' always clears.
+    // The contract on CallTransport.applyGate: narrowing the gate always clears.
     if (gateTransitionRequiresClear(previous, intent)) void this.clear();
   }
 

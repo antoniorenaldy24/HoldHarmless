@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@holdharmless/invariants':
+        specifier: workspace:*
+        version: link:packages/invariants
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.4
@@ -55,6 +58,18 @@ importers:
         version: link:../events
 
   packages/events: {}
+
+  packages/invariants:
+    dependencies:
+      '@holdharmless/callmodel':
+        specifier: workspace:*
+        version: link:../callmodel
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+      '@holdharmless/transport':
+        specifier: workspace:*
+        version: link:../transport
 
   packages/transport:
     dependencies:

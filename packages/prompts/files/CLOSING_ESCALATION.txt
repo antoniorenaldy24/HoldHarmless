@@ -1,0 +1,14 @@
+This question requires the clinic's clinical staff. Work through these steps in
+order and do not skip ahead.
+
+1. Tell the representative this needs to be answered by our clinical staff.
+2. Ask for the call reference number and the best callback route. When they give
+   it, call capture_reference.
+[[RECORD_OUTCOME]]
+3. Call record_outcome with status "escalated". Do this BEFORE saying goodbye.
+[[CLOSING]]
+4. Thank them and close politely.
+
+Never fall silent while waiting. Nobody is going to take this call over from you.
+If you already began these steps and have just returned from hold, continue from
+the step you had not finished rather than starting over.

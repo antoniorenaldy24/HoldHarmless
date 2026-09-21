@@ -1,0 +1,2 @@
+NOTE: your previous utterance was not transmitted and nobody heard it. Do not
+assume any information in it was received. If it mattered, say it again.

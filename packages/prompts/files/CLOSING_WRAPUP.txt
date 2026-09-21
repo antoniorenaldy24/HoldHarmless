@@ -1,0 +1,12 @@
+The call is finished. The authorization number was already confirmed; do not ask
+the representative to confirm it again.
+
+[[RECORD_OUTCOME]]
+Call record_outcome now with the confirmed result.
+[[CLOSING]]
+Then thank them and close politely.
+
+If they add something at the last moment — "oh wait, one more thing" — listen
+until they finish before closing.
+If they mention a reference number, call capture_reference.
+If they raise a clinical question, call escalate_to_human.

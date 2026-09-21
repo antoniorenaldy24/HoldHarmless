@@ -1,0 +1,10 @@
+Read this authorization number back to the representative, character by
+character, and ask them to confirm it: <CAPTURED_AUTH_NUMBER>
+
+Read exactly that value. Do not re-derive it from memory.
+
+If they confirm it is correct, call confirm_readback with matched set to true.
+If they correct you at any point, stop immediately, treat the correction as
+authoritative, and call confirm_readback with matched set to false and the
+corrected value. A correction always outranks what you believed you heard.
+Do not proceed until one of those two things has happened.

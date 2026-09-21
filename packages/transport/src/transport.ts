@@ -33,7 +33,7 @@ export interface CallTransport {
   /**
    * Called by the Call Model only, with the derived value (ADR-007).
    *
-   * CONTRACT: a transition from 'open' to anything else ALSO issues clear().
+   * CONTRACT: any transition that narrows the gate ALSO issues clear().
    * Closing the gate stops future frames; it does not stop what the far end has
    * already queued, and AssemblyAI emits reply.audio faster than real time, so
    * seconds of speech can be sitting in that queue (ADR-007, "Why layer 2 needs
@@ -72,7 +72,15 @@ export function gateAdmits(intent: GateIntent, source: AudioSource): boolean {
   }
 }
 
-/** True when moving from `from` to `to` must flush agent audio already queued. */
+/**
+ * True when moving from `from` to `to` must flush media already queued at the
+ * far end — whenever the new gate admits strictly less than the old one.
+ *
+ * An earlier version checked agent audio only, so dtmf_only -> closed issued no
+ * clear. That transition happens when a hold cue arrives mid-navigation, and it
+ * left DTMF tones queued to play into the hold. INV-3 says EVERY gate.changed to
+ * closed is followed by a clear; implementing the invariant is what exposed it.
+ */
 export function gateTransitionRequiresClear(from: GateIntent, to: GateIntent): boolean {
-  return gateAdmits(from, 'agent') && !gateAdmits(to, 'agent');
+  return (['agent', 'dtmf'] as const).some((source) => gateAdmits(from, source) && !gateAdmits(to, source));
 }

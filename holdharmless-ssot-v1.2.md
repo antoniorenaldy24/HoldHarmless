@@ -546,7 +546,7 @@ graph TB
     CM --> AS
     CM --> INV
     AB <--> LB
-    LB <--> PQ
+    LB --> PQ
     LB --> GZ
     AB <--> AS
     AB --> ACL
@@ -567,11 +567,13 @@ graph TB
     AS <--> AAI
     GZ --> SCR
     SCR --> AUD
-    AUD --> PQ
+    AUD --> LB
     SCR --> TEL
 ```
 
-There is exactly one audio link, and it is bidirectional. `check-doc-claims.ts` check #11 verifies that every link in this diagram has an explicit direction and format statement in §4.
+There is exactly one audio link, and it is bidirectional.
+
+**Two arrows corrected in v1.3.** The diagram had `AUD --> PQ` and `LB <--> PQ`. The playout queue holds audio the harness *receives* — "it holds a playout queue for the audio it is sent" (§10.1) — so it is fed by the link and feeds nothing back into it. The pre-rendered assets and the live microphone are what the harness *sends*, so they feed the link, not the queue. Drawn the old way, the diagram showed the harness playing its own IVR prompts into the buffer meant to hold the agent's voice. Found while building check #11, which verifies the audio links but cannot verify direction. `check-doc-claims.ts` check #11 verifies that every link in this diagram has an explicit direction and format statement in §4.
 
 ### 3.2 Component responsibilities
 
@@ -605,6 +607,8 @@ There is exactly one audio link, and it is bidirectional. `check-doc-claims.ts` 
 
 ```
 Harness ──μ-law 8 kHz, 20 ms frames──► Loopback link ──► Audio Bridge
+(pre-rendered assets, or
+ live microphone in HUMAN_REP)
                                        (delay + jitter)        │
                                                                │ passed through unchanged
                                                                ▼
@@ -621,6 +625,8 @@ Harness Playout Queue ◄── Loopback link ◄──────────�
 ```
 
 One bidirectional WebSocket. No resampling anywhere. Frame format is identical in both directions and identical to what AssemblyAI expects, which is the whole reason the local transport is faithful enough to build on.
+
+**The Agent Session hop re-frames the audio without re-encoding it.** Added in v1.3; the diagram above draws the Audio Bridge speaking to AssemblyAI directly, and between them sits the Agent Session (§12.6), which owns that WebSocket. Day 0 established what it does to each frame (§7.1): the 160 μ-law bytes travel as **base64 inside JSON** — `{"type": "input.audio", "audio": …}` outbound and `{"type": "reply.audio", "data": …}` inbound, two different field names. The samples are untouched, so "no resampling anywhere" stands. What changes is the envelope: roughly a third more bytes on this hop, and a decode step in each direction that the loopback link, which carries raw binary frames, does not have. Found by check #11, which could not locate the Agent Session anywhere in this section.
 
 ### 4.2 Two latency definitions, both measured
 
@@ -854,7 +860,7 @@ Configuration is a function of `(channel, phase)`.
 | `HUMAN` | `EXCHANGE` | open | `true` | **700 ms** | **`max_accuracy`** | `get_auth_request`, `capture_auth_number`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
 | `HUMAN` | `READBACK` | open | `true` | **800 ms** | **`max_accuracy`** | `confirm_readback`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
 | `HUMAN` | `CLOSING` | open | `true` | — | `balanced` | `record_outcome`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
-| any but `CLOSED` | `DONE` | derived | `false` | — | `balanced` | **none** — and no silence recovery |
+| `HUMAN`, `HOLD`, `IVR`, `TRANSFER` | `DONE` | derived | `false` | — | `balanced` | **none** — and no silence recovery |
 | `CLOSED` | `DONE` | closed | — | — | — | — |
 
 **Three rows above were corrected in v1.3 by `reachablePositions()` in `packages/callmodel`**, which computes the reachable pairs by breadth-first search over §5.3 and §5.4 rather than listing them by hand. It found eight reachable positions with no policy and one policy for an unreachable position:
@@ -1010,6 +1016,8 @@ Every observation carries `signalsAvailable` and `windowsMs`. Without both, a co
 **The operating point is a written decision, not an emergent one.** A-7 is the hard constraint; A-5 is optimized underneath it. Tune `MIN_WEIGHT` to the lowest value that still yields zero false exits on the calibration set, then report whatever A-5 figure results. If A-5 cannot be met at that value, the correct response is better signals, not a lower threshold.
 
 **The sensitivity ramp has a floor and a limit.** The `HOLD` recovery action raises semantic sensitivity by one step every 8 seconds. Left unbounded it would run roughly 150 times on a 20-minute hold. It is capped at **three steps**, and `MIN_WEIGHT` never falls below `MIN_WEIGHT_FLOOR`, which is the non-hold baseline.
+
+> **Open question, raised by module 1.5 and not yet decided.** The probe below fires in channel `HOLD`, where `gateFor()` is always `closed` — so the reply it creates is discarded by the transport before anyone can hear it. `INV-4` exempts the probe from the gate condition, but `INV-2` does not exempt its audio, and cannot without making the gate depend on something other than who is listening (ADR-007). As written, the probe is billed and inaudible. The two coherent resolutions are to give `gateFor()` a third input for a single sanctioned probe, or to remove the probe and rely on `HOLD_TIMEOUT_MS`. Recorded here rather than resolved in code, because either one changes a decision record.
 
 **One intermediate escape.** After three ramp steps with no result, the agent is permitted a single `createReply` asking whether anyone is on the line. That is the only speech allowed during hold, it happens at most once, and it is logged as `reply.requested` with cause `hold_probe`.
 
@@ -1502,11 +1510,37 @@ The 300-character limit is validated **once, at `AuthRequest` creation** (§9.1)
 
 **Minimum-necessary disclosure is measured.** The harness reports which fields its persona asked for; `over_disclosure_count` (§16.2) counts fields returned that were never requested.
 
+**Field mapping — `get_auth_request.fields` to `AuthRequest`.** Added in v1.3 because check #8 found these eight values stated nowhere as a mapping: the handler's behavior for each was implied by name alone.
+
+| `fields` value | `AuthRequest` field | Handling |
+|---|---|---|
+| `member_id` | `memberId` | returned as stored |
+| `patient_dob` | `patientDob` | returned as stored (ISO date) |
+| `cpt_code` | `cptCode` | returned as stored |
+| `icd_code` | `icdCode` | returned as stored |
+| `provider_npi` | `providerNpi` | returned as stored |
+| `service_date` | `serviceDate` | returned as stored (ISO date) |
+| `priority` | `priority` | returned as stored |
+| `clinical_summary` | `clinicalSummary` | returned verbatim, never summarized or excerpted (ADR-016) |
+
+Only the fields named in the call are returned, and each return is logged, which is what makes `over_disclosure_count` measurable.
+
 ### 8.4 Reference capture is independent of the closing phase
 
 The purpose of capturing a reference number is to protect the information if the connection drops — and a dropped link skips the closing entirely. If it could only be written through `record_outcome`, it would be absent in exactly the scenario that justified it.
 
 `capture_reference` is permitted in every phase where a human is present, emits `reference.captured` immediately, and is stored to `AuthRequest.lastReference`, which survives the call.
+
+**`kind` is descriptive, and deliberately changes nothing.** Added in v1.3, because check #8 found these values with no stated behavior — which is exactly how a value with *intended* behavior and a value with *none* become indistinguishable.
+
+| `kind` | Stored | Behavior |
+|---|---|---|
+| `call_reference` | `reference.captured.kind` | none beyond storage |
+| `case_number` | `reference.captured.kind` | none beyond storage |
+| `ticket_number` | `reference.captured.kind` | none beyond storage |
+| `other` | `reference.captured.kind` | none beyond storage |
+
+Every kind is captured the same way because the purpose is the same: to survive a dropped link. The value is recorded so a person reading panel 8 knows what the representative called it.
 
 ### 8.5 Handler-enforced validation
 
@@ -1768,6 +1802,10 @@ type CallEvent = { seq: number; callId: string; at: string } & (
                                 clearSent: boolean; producer: Producer }
   | { t: 'hold.suspected';      trigger: 'hold_cue' | 'periodic_provisional'
                                        | 'notify_transfer' | 'reconnect'; atMs: number }
+  | { t: 'hold.cleared';        reason: 'human_confirmed' | 'hold_confirmed' | 'reconnected' }
+  | { t: 'escalation.summary';  source: 'model' | 'deterministic';
+                                urgency: 'EXPEDITED' | 'Routine'; summary: string }
+  | { t: 'network.profile_changed'; from: NetworkProfileName; to: NetworkProfileName }
   | { t: 'prompt.loaded';       files: string[]; hedged: boolean;
                                 disclosureIncluded: boolean; substitutions: string[] }
   | { t: 'reply.requested';     cause: 'silence_recovery' | 'escalation_instruction'
@@ -1795,7 +1833,8 @@ type CallEvent = { seq: number; callId: string; at: string } & (
                                 status: AuthRequestStatus; skipped: boolean; reason?: string }
   | { t: 'safety.violation';    kind: 'audio_during_hold' | 'auth_number_mismatch'
                                     | 'disclosure_skipped' | 'closing_before_outcome';
-                                detail: string; frameCount?: number; durationMs?: number }
+                                detail: string; frameCount?: number; durationMs?: number;
+                                toolCallId?: string }
   | { t: 'invariant.violated';  id: string; detail: string }
   | { t: 'harness.telemetry';   metric: string; value: number; detail?: string }
   | { t: 'transport.fault';     kind: 'malformed_frame' | 'jitter_overflow'
@@ -1814,6 +1853,15 @@ type CallEvent = { seq: number; callId: string; at: string } & (
 3. **`tool.rejected` and `safety.violation` may both fire for one `toolCallId`, and that is correct.** A validation rejection touching a safety class is genuinely two facts. `INV-15` forbids only the redundant combination — a `state_not_allowed` rejection paired with a violation.
 4. **Harness telemetry needs no clock offset.** Both processes share one host and one system clock (ADR-001), so `at` is directly comparable across them. A carrier or multi-host build would need offset estimation; this one does not, and saying so here prevents someone adding it speculatively.
 5. **`turn.transcribed.isClosing` is not optional.** It is the runtime half of the outcome-before-closing guarantee.
+
+**Four additions in v1.3, each found by implementing an invariant against this schema** (module 1.5). In every case the invariant named something the log could not carry — the K-4 class, "a claim without a reachable mechanism":
+
+| Addition | The invariant that could not be checked without it |
+|---|---|
+| `hold.cleared` | **INV-1.** `hold.suspected` had no counterpart, so the moment §5.5 clears suspicion was recorded only as a side field of `gate.changed`. The gate derivation's second input was therefore observable only through the event INV-1 audits: delete a `gate.changed` and its input vanished with it, leaving a stale gate that looked consistent. Found when the INV-1 mutation test passed a log it should have failed. `holdSuspected` now has one source in the log, and each `gate.changed` is checked against it |
+| `escalation.summary` | **INV-9** accepts "a deterministic §8.6 summary" as evidence, and §8.1 says it "lives in the event log", but no event carried it. One event for both paths also gives panel 8 a single thing to read |
+| `safety.violation.toolCallId` | **INV-15** pairs a violation with a rejection "for the same `toolCallId`"; the event had no such field |
+| `network.profile_changed` | **INV-16** requires the profile in force for every transition and metric, and §19.3 can change it mid-call. Derived from `call.started` plus this event rather than stamped on every event — the same reason the gate is derived |
 
 `seq` is monotonic per `callId` and assigned **only by the core**, including for harness events.
 
@@ -1849,7 +1897,7 @@ All `BOT_REP` and IVR speech is **pre-rendered to μ-law 8 kHz files, offline, b
 
 ### 10.3 The playout queue
 
-Specified in ADR-008. Interface in §12.11.
+Specified in ADR-008. Interface in §12.10.
 
 | Behavior | Rule |
 |---|---|
@@ -2555,7 +2603,7 @@ Run on every transition, at call end, and on every fixture replay. A violation e
 | **INV-9** | `record_outcome` with `status = 'escalated'` implies the log holds a valid `escalate_to_human` call, or a deterministic §8.6 summary, meeting the §8.1 content rules. Checked against the log, never against `record_outcome` parameters | transition | **K-4** |
 | **INV-10** | `record_outcome` is accepted only while `AuthRequest.status` is not final, keyed on `requestId` | transition | |
 | **INV-11** | Every reachable `(channel, phase)` pair has a defined exit. Evaluated as the cartesian product | replay | **K-1** |
-| **INV-12** | No `AuthRequest` contains non-synthetic data | transition | |
+| **INV-12** | No `AuthRequest` contains non-synthetic data. **Defined mechanically in v1.3** (`packages/invariants/src/synthetic.ts`), because without a definition the invariant could not be checked: `providerNpi` must be ten digits that **fail** the NPI check digit, so it cannot be an issued NPI; `clinicCallbackPhone` must fall in 555-0100 to 555-0199, the range reserved for fiction; `payerEndpoint` must be a loopback URL; `patientRef` and `memberId` carry the `SYN` prefix | transition | |
 | **INV-13** | `phase` never changes on a `channel.changed` event, except the single `NOT_STARTED → EXCHANGE` row in §5.4 | transition | **K-1** |
 | **INV-14** | Every `tool.called` has exactly one `tool.returned`, `tool.rejected`, or `tool.result_discarded` | call-end | |
 | **INV-15** | A `tool.rejected` with `reason: 'state_not_allowed'` is never accompanied by a `safety.violation` for the same `toolCallId`. Validation rejections touching a safety class emit both, correctly | transition | |
@@ -2593,7 +2641,7 @@ A document can state that something is enforced while naming a mechanism that ca
 | 7 | Every field named in an invariant exists on the type in §9.1 | An invariant over a removed field |
 | 8 | Every enum value in every tool schema appears in at least one mapping table | A status with no downstream behavior |
 | 9 | Every `ToolName` in `TOOL_ALLOWLIST` appears in `TOOL_EFFECT` | A tool added without declaring its effect |
-| 10 | Every `(channel, phase)` pair §18 marks reachable has a row in §5.6 and §5.7 | A position added without a policy |
+| 10 | Every `(channel, phase)` pair **computed as reachable from §5.3 and §5.4** has a row in §5.6, no §5.6 row claims an unreachable pair, and every reachable pair with silence recovery has a row in §5.7 | A position added without a policy. **Amended in v1.3:** the original text read reachability from §18, which was itself wrong about `IVR` — so the check as first specified trusted the claim it was meant to test |
 | 11 | Every link in the §3.1 diagram has an explicit direction and format statement in §4 | An audio path whose properties are assumed |
 | 12 | Every `<UPPER_CASE>` placeholder in every prompt file maps to a field in §9.1 | A first sentence containing an unresolvable placeholder |
 

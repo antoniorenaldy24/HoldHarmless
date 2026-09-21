@@ -30,11 +30,12 @@ describe('gate admission (INV-2)', () => {
     assert.equal(gateAdmits('closed', 'dtmf'), false);
   });
 
-  test('clear is required exactly when agent audio stops being admitted', () => {
+  test('clear is required whenever the gate admits strictly less (INV-3)', () => {
     assert.equal(gateTransitionRequiresClear('open', 'closed'), true);
     assert.equal(gateTransitionRequiresClear('open', 'dtmf_only'), true);
+    assert.equal(gateTransitionRequiresClear('dtmf_only', 'closed'), true, 'queued DTMF must not play into a hold');
     assert.equal(gateTransitionRequiresClear('closed', 'open'), false);
-    assert.equal(gateTransitionRequiresClear('dtmf_only', 'closed'), false, 'no agent audio was flowing');
+    assert.equal(gateTransitionRequiresClear('dtmf_only', 'open'), false);
     assert.equal(gateTransitionRequiresClear('closed', 'closed'), false);
   });
 });

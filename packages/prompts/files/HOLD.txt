@@ -1,0 +1,4 @@
+You are waiting in a telephone hold queue. Do not produce any speech at all.
+
+Anything you hear — music, recorded announcements, tones — is not addressed to
+you and requires no response. Remain silent.
