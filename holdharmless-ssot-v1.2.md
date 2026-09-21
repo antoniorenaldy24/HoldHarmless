@@ -1908,7 +1908,9 @@ All `BOT_REP` and IVR speech is **pre-rendered to μ-law 8 kHz files, offline, b
 
 `scripts/render-assets.ts` renders the script to files from a chosen TTS at build time. The renderer is not part of the runtime and may be swapped freely.
 
-**Hold audio** is a looping music file plus periodic announcement files, deliberately loopable so the 20-second autocorrelation signal has something real to detect.
+**Hold audio** is a looping music file plus periodic announcement files, deliberately loopable so the 20-second autocorrelation signal has something real to detect. (v1.3: the music is generated, not recorded — a 16-second chord loop with an arpeggio, deterministic to the byte and free of any licence, with no click at the loop point.)
+
+**Voices, as rendered (v1.3):** IVR `en-US-AriaNeural` at −10%, first representative `en-US-AndrewNeural` at −15% (chosen by ear on Day 0), second representative `en-GB-SoniaNeural` at −15% — different accent and gender from the first, so the two are not near neighbours for party detection. `pnpm render-assets` is incremental: a manifest records what each file was rendered from, and a stale file is refused at startup rather than played.
 
 ### 10.3 The playout queue
 
@@ -2449,6 +2451,14 @@ export interface HarnessSession {
 ```
 
 `speakAs` takes a line identifier rather than text, because the audio is pre-rendered (§10.2). That is enforced by type, so nobody accidentally introduces a runtime TTS call.
+
+**As built in v1.3 (module 1.10, the week-1 skeleton).**
+
+- **Personas are numbered 0 (the IVR), 1 and 2**, and `speakAs(persona, lineId)` refuses a line rendered in another role's voice. Otherwise the harness's party count (ADR-018) could disagree with what was audible.
+- **DTMF is decoded from what reaches the harness's speaker, not from what arrives.** A tone the core `clear()`ed from the playout queue was never heard, so it selects nothing.
+- **A link that closes is a hangup at the far end**, whether or not the core's `hangup` message arrived first — it travels through the delay line and can lose that race. Found by a test suite that took 25 s too long: the harness had gone on running the menu of a call nobody was on, and would have reported a false `menu_abandoned`.
+- **Speech navigation needs a recognizer, and the SSOT does not name one — open.** §10.5 requires speech navigation and `onSpokenChoice(text)` receives text, but nothing specifies what turns the agent's audio into that text. The two candidates cost different things: a second AssemblyAI streaming session per call (credit), or a local recognizer (a dependency, and a second recognition error rate in the rig). Until this is decided, `SpeechRecognizer` is an injected interface, the menu logic for speech mode is tested through it, and the harness refuses `navMode: 'speech'` without one. It blocks the speech half of E1's fallback, not the DTMF half.
+- **Telemetry names used so far:** `dtmf_decode_first_try` and `speech_choice_first_try` (one per menu level, when it is left), `menu_completed` (path as detail), `menu_abandoned`, `parties_used`, `rep_line_done`, `harness_error`. A core connecting late receives the earlier ones.
 
 ---
 

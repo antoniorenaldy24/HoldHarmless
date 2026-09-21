@@ -169,6 +169,9 @@ importers:
       '@holdharmless/invariants':
         specifier: workspace:*
         version: link:packages/invariants
+      '@holdharmless/ivr-harness':
+        specifier: workspace:*
+        version: link:apps/ivr-harness
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.4
@@ -206,6 +209,28 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.20.4)(tsx@4.23.13)
+
+  apps/ivr-harness:
+    dependencies:
+      '@holdharmless/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../../packages/events
+      '@holdharmless/transport':
+        specifier: workspace:*
+        version: link:../../packages/transport
+      '@holdharmless/transport-loopback':
+        specifier: workspace:*
+        version: link:../../packages/transport-loopback
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
 
   packages/agent: {}
 

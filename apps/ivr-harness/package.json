@@ -1,0 +1,19 @@
+{
+  "name": "@holdharmless/ivr-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The simulated switchboard (SSOT §10): menus, hold, representatives, DTMF decoding, playout queue, telemetry.",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@holdharmless/audio": "workspace:*",
+    "@holdharmless/events": "workspace:*",
+    "@holdharmless/transport": "workspace:*",
+    "@holdharmless/transport-loopback": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": { "@types/ws": "^8.5.13" }
+}

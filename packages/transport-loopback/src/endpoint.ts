@@ -8,6 +8,8 @@
  * dragging in a script engine.
  */
 
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
 import { BYTES_PER_FRAME, FRAME_MS } from '@holdharmless/audio';
 import { DelayLine, type NetworkProfile } from '@holdharmless/transport';
@@ -35,6 +37,7 @@ export interface FarEndSession {
   onPlayed(handler: (frame: Uint8Array) => void): void;
   /** Called for every frame as it ARRIVES, before queueing. */
   onReceived(handler: (frame: Uint8Array, atMs: number) => void): void;
+  /** Once per call: on the core's hangup message, or on the link closing, whichever is first. */
   onHangup(handler: () => void): void;
   startDrain(): void;
   stopDrain(): void;
@@ -50,6 +53,19 @@ export class LoopbackEndpoint {
     this.#wss = wss;
     this.#options = options;
     wss.on('connection', (ws) => this.#accept(ws));
+  }
+
+  /**
+   * An endpoint with no listening socket of its own, for a process that serves
+   * more than one WebSocket path on one port — the harness serves /call and
+   * /control on 8081 (§13). The owner routes upgrades here with handleUpgrade().
+   */
+  static detached(options: Omit<LoopbackEndpointOptions, 'port' | 'host'>): LoopbackEndpoint {
+    return new LoopbackEndpoint(new WebSocketServer({ noServer: true }), { ...options, port: 0 });
+  }
+
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+    this.#wss.handleUpgrade(req, socket, head, (ws) => this.#wss.emit('connection', ws, req));
   }
 
   static listen(options: LoopbackEndpointOptions): Promise<LoopbackEndpoint> {
@@ -98,6 +114,12 @@ export class LoopbackEndpoint {
     const receivedHandlers: ((f: Uint8Array, at: number) => void)[] = [];
     const hangupHandlers: (() => void)[] = [];
     let drain: NodeJS.Timeout | null = null;
+    let ended = false;
+    const endCall = () => {
+      if (ended) return;
+      ended = true;
+      for (const h of hangupHandlers) h();
+    };
 
     const session: FarEndSession = {
       playout,
@@ -143,14 +165,19 @@ export class LoopbackEndpoint {
           out.push({ k: 'control', msg: { type: 'cleared', id: msg.id, marks: playout.clear() } });
           break;
         case 'hangup':
-          for (const h of hangupHandlers) h();
+          endCall();
           break;
       }
     });
 
+    // A link that closes is a call that ended, whether or not the core's hangup
+    // message arrived first — it is sent through the delay line and can lose the
+    // race with the close. Without this the far end would go on running the
+    // script of a call nobody is on.
     ws.on('close', () => {
       session.stopDrain();
       out.close();
+      endCall();
     });
 
     if (this.#options.autoDrain ?? true) session.startDrain();
