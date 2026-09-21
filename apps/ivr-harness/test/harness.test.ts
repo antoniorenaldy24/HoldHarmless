@@ -400,6 +400,23 @@ describe('the harness over the loopback transport', () => {
     await c.close();
   });
 
+  test('a tone broken by an underflow hole is heard broken, not as one press', async () => {
+    // Two 40 ms fragments of "3" with ~80 ms of empty queue between them. A
+    // listener hears tone, silence, tone: two fragments, each too short to be a
+    // key press. Decoding from played frames only would join them into 80 ms.
+    const h = await start();
+    const c = await startCall(h, 'SYN-CALL-hole');
+    await waitFor('main menu', () => c.heard.includes('ivr_main_menu'));
+    const tone = dtmf.generate('3', 100, 0);
+    for (const part of [tone.slice(0, 2), tone.slice(2, 4)]) {
+      for (const f of part) { c.transport.sendAudio(f, 'dtmf'); await sleep(20); }
+      await sleep(80);
+    }
+    await sleep(300);
+    assert.ok(!c.heard.includes('ivr_priorauth_menu'), 'the broken tone navigated the menu');
+    await c.close();
+  });
+
   test('no input for the timeout repeats the menu', async () => {
     const h = await start({ noInputTimeoutMs: 300 });
     const c = await startCall(h, 'SYN-CALL-timeout');

@@ -148,6 +148,21 @@ describe('Goertzel detection (A-1, in-process half)', () => {
     assert.equal(decode('11'), '11');
   });
 
+  test('a tone fragment too short to be a key press is rejected', () => {
+    // Found while building E1: a single 20 ms frame of tone decoded as a digit,
+    // because two overlapping windows share it. See classify().
+    const fragment = (frames: number) => {
+      const detector = createGoertzelDetector();
+      const tone = dtmf.generate('3', 100, 0).slice(0, frames);
+      let out = '';
+      for (const f of [silenceFrame(), silenceFrame(), ...tone, ...Array.from({ length: 6 }, silenceFrame)]) out += detector.push(f) ?? '';
+      return out;
+    };
+    assert.equal(fragment(1), '', '20 ms');
+    assert.equal(fragment(2), '', '40 ms');
+    assert.equal(fragment(3), '3', '60 ms, frame-aligned, is the shortest accepted');
+  });
+
   test('silence produces nothing', () => {
     const detector = createGoertzelDetector();
     for (let i = 0; i < 50; i++) assert.equal(detector.push(silenceFrame()), null);

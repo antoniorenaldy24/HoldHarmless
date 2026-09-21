@@ -11,12 +11,16 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
-import { BYTES_PER_FRAME, FRAME_MS } from '@holdharmless/audio';
+import { BYTES_PER_FRAME, FRAME_MS, silenceFrame } from '@holdharmless/audio';
 import { DelayLine, type NetworkProfile } from '@holdharmless/transport';
 import { createPlayoutQueue, type PlayoutQueue } from './playout.js';
 import { parseControl, type CoreToFar, type FarToCore } from './protocol.js';
 
 type Outbound = { k: 'audio'; frame: Uint8Array } | { k: 'control'; msg: FarToCore };
+
+/** Silent ticks between played frames counted as underflow, not as a pause. */
+export const UNDERFLOW_SPAN = 3;
+const SILENCE = silenceFrame();
 
 export type LoopbackEndpointOptions = {
   port: number;
@@ -35,6 +39,19 @@ export interface FarEndSession {
   sendAudio(frame: Uint8Array): void;
   /** Called for every frame that actually reaches the speaker at the far end. */
   onPlayed(handler: (frame: Uint8Array) => void): void;
+  /**
+   * Called on EVERY drain tick with what the speaker emits: the played frame,
+   * or comfort silence when the queue is empty (§4.4). This, not onPlayed, is
+   * what a listener hears — onPlayed skips the holes an underflow leaves, so a
+   * decoder fed from it would hear a tone broken by jitter as unbroken.
+   */
+  onSpeaker(handler: (frame: Uint8Array) => void): void;
+  /**
+   * Ticks on which the queue was empty in the middle of audio: a silent tick
+   * with a played frame shortly before and after it (within UNDERFLOW_SPAN).
+   * Longer silences are pauses, not underflow.
+   */
+  underflowCount(): number;
   /** Called for every frame as it ARRIVES, before queueing. */
   onReceived(handler: (frame: Uint8Array, atMs: number) => void): void;
   /** Once per call: on the core's hangup message, or on the link closing, whichever is first. */
@@ -111,6 +128,10 @@ export class LoopbackEndpoint {
     });
 
     const playedHandlers: ((f: Uint8Array) => void)[] = [];
+    const speakerHandlers: ((f: Uint8Array) => void)[] = [];
+    let tickNo = 0;
+    let lastPlayedTick = -Infinity;
+    let underflows = 0;
     const receivedHandlers: ((f: Uint8Array, at: number) => void)[] = [];
     const hangupHandlers: (() => void)[] = [];
     let drain: NodeJS.Timeout | null = null;
@@ -125,14 +146,24 @@ export class LoopbackEndpoint {
       playout,
       sendAudio: (frame) => out.push({ k: 'audio', frame }),
       onPlayed: (h) => void playedHandlers.push(h),
+      onSpeaker: (h) => void speakerHandlers.push(h),
+      underflowCount: () => underflows,
       onReceived: (h) => void receivedHandlers.push(h),
       onHangup: (h) => void hangupHandlers.push(h),
       startDrain: () => {
         if (drain !== null) return;
         // One frame per tick at the frame cadence (§10.3).
         drain = setInterval(() => {
+          tickNo++;
           const frame = playout.tick();
-          if (frame !== null) for (const h of playedHandlers) h(frame);
+          if (frame !== null) {
+            const gap = tickNo - lastPlayedTick - 1;
+            if (gap >= 1 && gap <= UNDERFLOW_SPAN) underflows += gap;
+            lastPlayedTick = tickNo;
+            for (const h of playedHandlers) h(frame);
+          }
+          const heard = frame ?? SILENCE;
+          for (const h of speakerHandlers) h(heard);
         }, FRAME_MS);
       },
       stopDrain: () => {

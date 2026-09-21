@@ -12,6 +12,7 @@
     "check:invariants": "tsx scripts/check-invariants.ts",
     "check:doc": "tsx scripts/check-doc-claims.ts",
     "render-assets": "tsx scripts/render-assets.ts",
+    "e1": "tsx scripts/e1-dtmf-reach.ts",
     "harness": "pnpm --filter @holdharmless/ivr-harness start",
     "check": "pnpm typecheck && pnpm test && pnpm check:invariants && pnpm check:doc",
     "test:ci": "node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/gh-annotations.mjs --test-reporter-destination=stdout packages/*/test/*.test.ts apps/ivr-harness/test/*.test.ts"
@@ -21,7 +22,10 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "@holdharmless/invariants": "workspace:*",
-    "@holdharmless/ivr-harness": "workspace:*"
+    "@holdharmless/ivr-harness": "workspace:*",
+    "@holdharmless/audio": "workspace:*",
+    "@holdharmless/transport": "workspace:*",
+    "@holdharmless/transport-loopback": "workspace:*"
   },
   "packageManager": "pnpm@12.5.1"
 }

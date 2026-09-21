@@ -82,6 +82,23 @@ export function createGoertzelDetector(): GoertzelDetector {
     const weakest = Math.min(rowEnergy, colEnergy);
     if (meanOther > 0 && weakest / meanOther < MIN_RELATIVE_ENERGY) return null;
 
+    // The pair must be present in BOTH halves of the window, not just in its
+    // total. Consecutive windows overlap by half (see push()), so without this
+    // a single 20 ms fragment fills the shared half of two windows, each passes
+    // on energy alone, and the fragment decodes as a digit. Measured before this
+    // check: 20 ms of tone followed by silence decoded as "3". Standard DTMF
+    // receivers must reject a tone that short (ITU-T Q.24's non-operate bound
+    // is in the low 20s of ms). Two consecutive windows now mean what ADR-013
+    // intended: the tone spans them, i.e. at least 60 ms of it.
+    const half = WINDOW_SAMPLES / 2;
+    const lowF = LOW_TONES[row]!;
+    const highF = HIGH_TONES[col]!;
+    for (const part of [window.subarray(0, half), window.subarray(half)]) {
+      // Energy of a steady tone scales with the square of the block length.
+      const floor = MIN_ABSOLUTE_ENERGY / 4;
+      if (goertzelEnergy(part, lowF) < floor || goertzelEnergy(part, highF) < floor) return null;
+    }
+
     return DTMF_KEYPAD[row]![col]!;
   }
 

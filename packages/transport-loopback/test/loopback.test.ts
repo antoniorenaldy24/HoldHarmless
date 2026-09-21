@@ -9,7 +9,7 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { BYTES_PER_FRAME, FRAME_MS, dtmf, createGoertzelDetector } from '@holdharmless/audio';
+import { BYTES_PER_FRAME, FRAME_MS, MULAW_SILENCE, chunkToFrames, dtmf, createGoertzelDetector } from '@holdharmless/audio';
 import { PROFILES, raiseTimerResolution, measureTimerAccuracy } from '@holdharmless/transport';
 import { LoopbackEndpoint, LoopbackTransport, createPlayoutQueue, type FarEndSession } from '../src/index.js';
 
@@ -217,7 +217,7 @@ describe('loopback link (acceptance 1.3)', () => {
 
     const detector = createGoertzelDetector();
     let decoded = '';
-    session.onPlayed((f) => {
+    session.onSpeaker((f) => {
       const d = detector.push(f);
       if (d !== null) decoded += d;
     });
@@ -229,6 +229,60 @@ describe('loopback link (acceptance 1.3)', () => {
     }
     await sleep(200);
     assert.equal(decoded, '2');
+    await transport.hangup();
+  });
+
+  test('A-1 regression: 20 digits at 100/50 ms decode 20/20 across TELEPHONY, off the frame grid', async () => {
+    // The E1 criterion, kept in CI at one offset (scripts/e1-dtmf-reach.ts runs
+    // the full sweep). Includes four immediate repeats, the case a short gap breaks.
+    const { endpoint, transport, session } = await pair(PROFILES.TELEPHONY, true);
+    cleanups.push(() => endpoint.close());
+    transport.applyGate('dtmf_only');
+    const detector = createGoertzelDetector();
+    let decoded = '';
+    session.onSpeaker((f) => { decoded += detector.push(f) ?? ''; });
+
+    const digits = '0123456789*#55443300';
+    const offset = new Uint8Array(56).fill(MULAW_SILENCE); // 7 ms
+    const tones = dtmf.generate(digits, 100, 50);
+    const bytes = new Uint8Array(offset.length + tones.length * BYTES_PER_FRAME);
+    bytes.set(offset);
+    tones.forEach((f, k) => bytes.set(f, offset.length + k * BYTES_PER_FRAME));
+    const start = performance.now();
+    for (const [k, f] of chunkToFrames(bytes).entries()) {
+      transport.sendAudio(f, 'dtmf');
+      // Paced by elapsed time, as the Audio Bridge will be.
+      const due = start + (k + 1) * FRAME_MS;
+      await sleep(Math.max(0, due - performance.now()));
+    }
+    await sleep(300);
+    assert.equal(decoded, digits);
+    await transport.hangup();
+  });
+
+  test('the speaker emits comfort silence on every empty tick; a short hole counts as underflow, a pause does not', async () => {
+    const { endpoint, transport, session } = await pair(PROFILES.CLEAN, true);
+    cleanups.push(() => endpoint.close());
+    transport.applyGate('open');
+    const speaker: number[] = [];
+    session.onSpeaker((f) => speaker.push(f[0]!));
+
+    const burst = (n: number) => { for (let i = 0; i < n; i++) transport.sendAudio(frameOf(0x33), 'agent'); };
+    burst(2);
+    await sleep(40 + 50); // the queue empties for a tick or two: a hole mid-audio
+    burst(2);
+    await sleep(60);
+    const afterHole = session.underflowCount();
+    assert.ok(afterHole >= 1, `a ${afterHole}-tick hole was not counted`);
+
+    await sleep(400); // a pause, far longer than UNDERFLOW_SPAN ticks
+    burst(2);
+    await sleep(80);
+    assert.equal(session.underflowCount(), afterHole, 'a pause was counted as underflow');
+
+    // Every tick was heard: audio where there was audio, silence elsewhere.
+    assert.equal(speaker.filter((b) => b === 0x33).length, 6);
+    assert.ok(speaker.filter((b) => b === 0xff).length > 15, 'the silent ticks were not emitted');
     await transport.hangup();
   });
 

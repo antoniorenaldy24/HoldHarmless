@@ -335,6 +335,26 @@ E1 sets the default for `IVR_NAV_MODE`. Both modes have their own prompt file (�
 
 **Tone timing is the only real variable.** Detection reliability depends on tone duration against the detector's window and on how the transport's jitter profile disturbs frame spacing. E1 sweeps tone length downward until detection degrades and records the lowest timing that still achieves 20/20.
 
+**E1 result (2026-09-22, `results/e1-dtmf.json`).** Twenty digits per trial (every key, plus four immediate repeats), five trials per timing, each starting at a different offset within a 20 ms frame; a timing passes only if all five are 20/20 with no insertions. Decoded from what the far end's *speaker* emits, underflow silence included (§4.4).
+
+| Tone (ms) ↓ · gap (ms) → | 50 | 40 | 30 | 20 |
+|---|---|---|---|---|
+| 100 | pass | pass | fail | fail |
+| 80 | pass | pass | fail | fail |
+| 70 | pass | pass | fail | fail |
+| 60 | pass | pass | fail | fail |
+| 50 | pass | pass | fail | fail |
+| 40 | fail | fail | fail | fail |
+
+Two limits, both mechanisms confirmed from the decoded strings rather than inferred:
+
+- **Gaps under 40 ms merge repeated digits.** "55443300" decodes as "5430" — no window in a 30 ms gap is silent throughout, so the detector's guard against one long tone reading as several presses never resets. Distinct digits are never lost. The agent presses one digit per menu level (`IVR_DTMF.txt`), so in use this bites only on a repeated digit within one `send_dtmf`; `DTMF_GAP_MS` stays at 50 regardless.
+- **A 40 ms tone is accepted or rejected depending on where it falls against the frame grid** (0/20 frame-aligned, 20/20 at a 4 ms offset). This is deliberate, and the result of a detector fix E1 forced — below.
+
+**A detector defect found while building E1, and fixed.** A single 20 ms fragment of tone decoded as a digit: consecutive 40 ms windows overlap by half (the fix for repeated digits in module 1.2), so one fragment filled the shared half of two windows, each passed on total energy, and "two consecutive detections" was satisfied by 20 ms of sound. Standard DTMF receivers must reject tones that short (ITU-T Q.24's non-operate bound is in the low 20s of ms). A window now counts only if the pair is present in **both** of its halves, which restores what "two consecutive windows" was meant to require: roughly 60 ms of continuous tone. The consequence for the harness is concrete — a tone the core clears from the playout queue after one frame has played is no longer heard as a key press.
+
+**A fidelity fix, also found here.** The far end decoded from `onPlayed`, which skips ticks on which the playout queue was empty. A listener hears those ticks as silence, so a tone with an underflow hole was being decoded as unbroken. The far end now decodes from `onSpeaker` — every tick, comfort silence included — and counts mid-audio underflow ticks. `TELEPHONY` produced 0–2 per 20-digit trial; none caused a miss.
+
 ### ADR-014 — Escalation is deferred, not a live transfer
 
 **Decision.** `escalate_to_human` means: the agent tells the representative the question needs clinic clinical staff, asks for a call reference number and callback route, **writes the outcome**, then delivers a closing and ends the call. The captured context becomes a task on the dashboard's Escalation Tasks panel (§11).
@@ -2467,7 +2487,7 @@ export interface HarnessSession {
 | Variable | Default | Notes |
 |---|---|---|
 | `NETWORK_PROFILE` | `TELEPHONY` | All measurements use this. `CLEAN` is for unit tests only |
-| `IVR_NAV_MODE` | set by E1 | `dtmf` \| `speech`; both have prompts |
+| `IVR_NAV_MODE` | **`dtmf`** | **Set by E1 (2026-09-22): 100/50 ms decodes 20/20 in every trial under `TELEPHONY` and `DEGRADED`.** `speech` stays the built fallback; its recognizer is undecided (§12.10) |
 | `AUDIO_ENCODING` | `audio/pcmu` | **E2 passed.** Accepted on both `input.format` and `output.format` at 8000 Hz; the 24 kHz path stays unbuilt |
 | `AUDIO_SAMPLE_RATE` | `8000` | Confirmed by E0 and E2 |
 | `ENABLE_INTERRUPTION_DELAY` | **`true`** | **E0 passed** — `turn_detection.interruption_delay` accepted (A-18) |
@@ -2479,7 +2499,7 @@ export interface HarnessSession {
 | `PLAYOUT_DEPTH_MS` | `200` | ADR-008 |
 | `JITTER_MAX_MS` | `200` | §4.4 |
 | `LATE_TEXT_GRACE_MS` | `4000` | §7.6 — wait after `reply.done` for agent text not yet arrived. Covers the 3.7 s worst case seen on Day 0 |
-| `DTMF_TONE_MS` / `DTMF_GAP_MS` | `100` / `50` | Swept downward by E1 |
+| `DTMF_TONE_MS` / `DTMF_GAP_MS` | `100` / `50` | **Kept after E1.** Lowest passing under `TELEPHONY` was 50/40; it fails `DEGRADED` (18–19/20), so it has no margin. 100/50 passes both |
 | `HOLD_CONFIRM_MS` | `3000` | From `HOLD_CUE` to the channel transition |
 | `SEMANTIC_N` | `2` | |
 | `CLASSIFIER_MARGIN` | `0.15` | |
@@ -2856,7 +2876,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | 1.8 | `packages/prompts` + `packages/detectors` | 1.4 | `positionalPromptName` total; renderer resolves every placeholder; hedge and disclosure mutually exclusive; both detectors unit-tested against positive and negative examples |
 | 1.9 | `packages/fixtures` | 1.1, 1.3 | Record and replay with zero API calls; replay reproduces the identical event sequence; `networkProfile` recorded |
 | 1.10 | `scripts/render-assets.ts` + harness skeleton | 1.2 | All IVR and `BOT_REP` lines rendered to μ-law files with distinct voices per role; a 3-level menu navigable in both nav modes; playout queue honors `clear` and `mark`; control channel live |
-| 1.11 | **E1** — DTMF timing sweep | 1.10 | Goertzel decodes 20/20 at 100 ms/50 ms under `TELEPHONY`; sweep downward and record the lowest timing still at 20/20; if 20/20 is unreachable, `IVR_NAV_MODE=speech` and note it |
+| 1.11 | **E1** — DTMF timing sweep | 1.10 | Goertzel decodes 20/20 at 100 ms/50 ms under `TELEPHONY`; sweep downward and record the lowest timing still at 20/20; if 20/20 is unreachable, `IVR_NAV_MODE=speech` and note it. **Done 2026-09-22: 100/50 passes; lowest 50/40; `IVR_NAV_MODE=dtmf` (ADR-013)** |
 
 **Week 1 gate.** If the agent cannot traverse a menu in either navigation mode, stop adding features.
 
@@ -2901,7 +2921,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 
 | ID | Assumption | Risk | Pass criteria |
 |---|---|---|---|
-| **A-1** | Goertzel decodes synthesized DTMF reliably across the transport | **Major** | 20/20 digits at 100 ms/50 ms under `TELEPHONY`; record the lowest timing still at 20/20 |
+| **A-1** | Goertzel decodes synthesized DTMF reliably across the transport | **Major** | **CLOSED by E1, 2026-09-22.** 20/20 at 100/50 ms under `TELEPHONY` in 5 of 5 trials at five sub-frame offsets, and under `DEGRADED`. Lowest passing: 50/40 ms. See ADR-013 for the two limits the sweep found |
 | **A-2** | `audio/pcmu` both directions is intelligible with accurate transcription | **High** | **CLOSED 2026-09-21.** Accepted both directions. Member ID, spelled letter, CPT `96413` and ICD `C50.911` transcribed identically at 8 kHz and 24 kHz. One gap, recorded rather than smoothed over: the date-of-birth **year** was lost entirely at 8 kHz and garbled at 24 kHz ("1980. 1968."). One sample at default `transcription_mode` — not a measurement, but `patient_dob` is a §8.1 field and a missing year is a silent failure. Follow-up in week 1 |
 | **A-3** | `clear` empties the playout queue and stops audio within 300 ms | **High** | Queue reports zero unplayed agent frames; audible audio stops within 300 ms; returned marks match discarded chunks |
 | **A-4** | The semantic layer separates `HUMAN` from `IVR_PROMPT` on partial deltas | **High** | ≥90% correct; **zero** IVR prompts classified as `HUMAN` |

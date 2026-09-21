@@ -166,12 +166,21 @@ importers:
 
   .:
     devDependencies:
+      '@holdharmless/audio':
+        specifier: workspace:*
+        version: link:packages/audio
       '@holdharmless/invariants':
         specifier: workspace:*
         version: link:packages/invariants
       '@holdharmless/ivr-harness':
         specifier: workspace:*
         version: link:apps/ivr-harness
+      '@holdharmless/transport':
+        specifier: workspace:*
+        version: link:packages/transport
+      '@holdharmless/transport-loopback':
+        specifier: workspace:*
+        version: link:packages/transport-loopback
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.4

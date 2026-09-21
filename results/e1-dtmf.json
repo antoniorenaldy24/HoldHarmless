@@ -1,0 +1,1021 @@
+{
+  "experiment": "E1",
+  "ranAt": "2026-09-21T21:42:18.150Z",
+  "host": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "node": "v22.14.0",
+    "timerResolution": "raised from 15.625 ms to 1 ms via timeBeginPeriod"
+  },
+  "digits": "0123456789*#55443300",
+  "trialsPerTiming": 5,
+  "trialOffsetsMs": [
+    0,
+    4,
+    8,
+    12,
+    16
+  ],
+  "criterion": "every trial decodes all 20 digits, in order, with no insertions",
+  "baseline": {
+    "toneMs": 100,
+    "gapMs": 50,
+    "pass": true
+  },
+  "lowestPassing": {
+    "toneMs": 50,
+    "gapMs": 40,
+    "msPerDigit": 90
+  },
+  "navModeDecision": "dtmf",
+  "cells": [
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 100,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 100,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 100,
+      "gapMs": 30,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 100,
+      "gapMs": 20,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 80,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 80,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 80,
+      "gapMs": 30,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55430",
+          "correct": 17,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 80,
+      "gapMs": 20,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 70,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 70,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 70,
+      "gapMs": 30,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 70,
+      "gapMs": 20,
+      "trials": [
+        {
+          "decoded": "0123456789*#54430",
+          "correct": 17,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 60,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 60,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 60,
+      "gapMs": 30,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#54430",
+          "correct": 17,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 60,
+      "gapMs": 20,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 50,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 50,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 50,
+      "gapMs": 30,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 2
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#554430",
+          "correct": 18,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 50,
+      "gapMs": 20,
+      "trials": [
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 40,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "13579#5430",
+          "correct": 10,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 40,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "",
+          "correct": 0,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 40,
+      "gapMs": 30,
+      "trials": [
+        {
+          "decoded": "13579#5430",
+          "correct": 10,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "TELEPHONY",
+      "toneMs": 40,
+      "gapMs": 20,
+      "trials": [
+        {
+          "decoded": "",
+          "correct": 0,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#5430",
+          "correct": 16,
+          "inserted": 0,
+          "underflows": 0
+        }
+      ],
+      "pass": false
+    },
+    {
+      "profile": "DEGRADED",
+      "toneMs": 100,
+      "gapMs": 50,
+      "trials": [
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 0
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 1
+        },
+        {
+          "decoded": "0123456789*#55443300",
+          "correct": 20,
+          "inserted": 0,
+          "underflows": 3
+        }
+      ],
+      "pass": true
+    },
+    {
+      "profile": "DEGRADED",
+      "toneMs": 50,
+      "gapMs": 40,
+      "trials": [
+        {
+          "decoded": "013456789*#5544300",
+          "correct": 18,
+          "inserted": 0,
+          "underflows": 3
+        },
+        {
+          "decoded": "012456789*#55443300",
+          "correct": 19,
+          "inserted": 0,
+          "underflows": 3
+        },
+        {
+          "decoded": "0123456789*#5544300",
+          "correct": 19,
+          "inserted": 0,
+          "underflows": 2
+        },
+        {
+          "decoded": "012345789*#5544330",
+          "correct": 18,
+          "inserted": 0,
+          "underflows": 3
+        },
+        {
+          "decoded": "012346789*#55443300",
+          "correct": 19,
+          "inserted": 0,
+          "underflows": 3
+        }
+      ],
+      "pass": false
+    }
+  ]
+}

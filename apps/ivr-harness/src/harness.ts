@@ -84,10 +84,11 @@ class Session implements HarnessSession {
   ) {
     this.pacer = new Pacer((f) => far.sendAudio(f));
 
-    // DTMF is decoded from what reaches the harness's speaker, not from what
-    // arrives: a tone the core clear()ed from the queue was never heard.
+    // DTMF is decoded from what the harness's speaker emits, not from what
+    // arrives: a tone the core clear()ed from the queue was never heard, and a
+    // tone with an underflow hole in it is heard WITH the hole (§4.4).
     const goertzel = createGoertzelDetector();
-    far.onPlayed((frame) => {
+    far.onSpeaker((frame) => {
       const digit = goertzel.push(frame);
       if (digit !== null) for (const h of this.digitHandlers) h(digit);
       recognizer?.feed(frame);
