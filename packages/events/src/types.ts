@@ -341,6 +341,13 @@ export type CallEventBody =
   | { t: 'transport.fault'; kind: TransportFaultKind; count: number }
   | { t: 'hold.tick'; elapsedMs: number; rampStep: number }
   | { t: 'session.resumed'; sessionId: string; gapMs: number }
+  /**
+   * §15's beyond-window path: a NEW session replaced the old one, and the
+   * conversation history did not carry over. Added in v1.3 when A-8 found that
+   * resume is refused in every form tried, so this — not session.resumed — is
+   * the event a real disconnect produces.
+   */
+  | { t: 'session.replaced'; previousSessionId: string; sessionId: string; gapMs: number; reason: string }
   | { t: 'call.dropped'; cause: DropCause }
   | { t: 'call.ended'; outcome: Outcome };
 

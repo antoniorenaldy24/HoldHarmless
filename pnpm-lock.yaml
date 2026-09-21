@@ -166,9 +166,15 @@ importers:
 
   .:
     devDependencies:
+      '@holdharmless/agent':
+        specifier: workspace:*
+        version: link:packages/agent
       '@holdharmless/audio':
         specifier: workspace:*
         version: link:packages/audio
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:packages/events
       '@holdharmless/invariants':
         specifier: workspace:*
         version: link:packages/invariants
@@ -184,12 +190,18 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.4
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       tsx:
         specifier: ^4.19.0
         version: 4.23.13
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
 
   apps/dashboard:
     dependencies:
@@ -241,7 +253,18 @@ importers:
         specifier: ^8.5.13
         version: 8.18.1
 
-  packages/agent: {}
+  packages/agent:
+    dependencies:
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
 
   packages/audio: {}
 

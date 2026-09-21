@@ -25,7 +25,11 @@
     "@holdharmless/ivr-harness": "workspace:*",
     "@holdharmless/audio": "workspace:*",
     "@holdharmless/transport": "workspace:*",
-    "@holdharmless/transport-loopback": "workspace:*"
+    "@holdharmless/transport-loopback": "workspace:*",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13",
+    "@holdharmless/agent": "workspace:*",
+    "@holdharmless/events": "workspace:*"
   },
   "packageManager": "pnpm@12.5.1"
 }

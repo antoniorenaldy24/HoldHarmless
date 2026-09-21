@@ -1876,6 +1876,7 @@ type CallEvent = { seq: number; callId: string; at: string } & (
                                     | 'jitter_underflow' | 'playout_overflow'; count: number }
   | { t: 'hold.tick';           elapsedMs: number; rampStep: number }
   | { t: 'session.resumed';     sessionId: string; gapMs: number }
+  | { t: 'session.replaced';    previousSessionId: string; sessionId: string; gapMs: number; reason: string }  // v1.3, A-8
   | { t: 'call.dropped';        cause: 'far_end_hangup' | 'link_drop' | 'timeout' | 'unresponsive' }
   | { t: 'call.ended';          outcome: Outcome }
 );
@@ -2334,6 +2335,14 @@ export interface AgentSession {
 }
 ```
 
+**As built in v1.3 (module 2.4).**
+
+- **`createReply` checks the ADR-022 conditions itself**, through a `guard()` callback the Call Model supplies and the session reads on every call, never caching it. It refuses — rejects with `ReplyRefused` and sends nothing, logs nothing — on a gate other than `open`, on `holdSuspected`, on a reply outstanding, and while disconnected. The Call Model still checks first; checking again at the one place a reply can be requested makes `INV-2` and `INV-4` true by construction rather than by every caller's care.
+- **A tool result queued after its turn's `reply.done`** (a slow handler) is sent at once when no reply is active — the model is waiting on it — and otherwise held for the next `reply.done`. §8.8 did not cover this case.
+- **`onReplyAudio` delivers μ-law bytes as received**, not 20 ms frames. Framing and pacing belong to the Audio Bridge, which must also flush its pacing buffer on `clear` (ADR-007).
+- **`onConnection('lost' | 'restored' | 'context_lost' | 'failed')`** replaces a bare `resume()` in practice. On `lost` the Call Model forces `holdSuspected` (§15 step 4); on `context_lost` it sets `pendingContextCorrection`. `resume(sessionId)` stays on the interface but is driven internally.
+- Live smoke (`scripts/agent-live-smoke.ts`, 2026-09-22): 12/12 — first reply audio 247 ms after `reply.create`, the three refusals, recovery from a forced disconnect in 1.8 s, a reply on the new session, and `session.end`.
+
 ### 12.7 `packages/prompts` and `packages/detectors`
 
 ```typescript
@@ -2567,6 +2576,16 @@ pnpm --filter dashboard dev
 4. **`holdSuspected` is forced true for the duration of the gap**, which closes the gate by derivation (ADR-007).
 5. Emit `session.resumed` with `gapMs`.
 6. **If the gap exceeds 30 seconds**, resume fails. Open a **new** session, re-send the full initial configuration including immutable fields, and set `pendingContextCorrection` so the next prompt tells the agent its earlier turns may not be in context. The call continues; the conversation history does not.
+
+**What A-8 found against the live API (2026-09-22), and what it changes.** `session.resume` was refused with `session_not_found` in every form tried: the documented `{ "type": "session.resume", "session_id" }` as the first message; with the `resume_token` that `session.ready` carries (it also carries `expires_at`; neither is in the documentation read); with the token on the URL; after a TCP reset and after a clean close; at gaps of 1.5–2.8 s. The documentation says resume should succeed inside 30 s and that configuration persists across it. This account's behavior says otherwise, and the probe stopped there rather than spend more credit guessing (`scripts/a8-resume-probe.ts`, ~4 minutes of session time in total).
+
+Consequences, as built in `packages/agent`:
+
+- **Step 6 is the path real disconnects take, not a fallback.** One resume attempt is still made — it is documented and costs well under a second — and on refusal the client opens a new session with the full configuration and reports the context as lost; the Call Model sets `pendingContextCorrection`. A live forced disconnect recovered this way in **1.8 s**, and the agent spoke on the new session straight away.
+- **The new session is logged as `session.replaced`** (`previousSessionId`, `sessionId`, `gapMs`, `reason`), not `session.resumed`, so a report can never count a replacement as a resume.
+- **Step 3 is kept** even though the documentation calls it unnecessary: re-sending the position configuration is idempotent, and if a resume ever succeeds it cannot hurt.
+- **Reconnection retries with backoff** (250 ms doubling to 5 s) until 120 s, then reports `failed`. Inside the window each attempt tries resume first; after the window, or after one refusal, it opens a new session directly.
+- **`end()` during recovery still ends the session recovery was opening.** Otherwise a replacement opened a moment after the call ended would be billed until it timed out.
 
 **Link disconnect.** Terminal by policy. The channel moves to `CLOSED`, `call.dropped` is emitted, and the Call Model resolves the outcome under `INV-18` and `INV-19` — an escalation already evidenced in the log is recorded as `escalated`, not `failed`.
 
@@ -2887,7 +2906,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | 2.1 | `classifier/acoustic` | Emits at 250 ms; provisional tier fires within 1.5 s of hold audio onset; confirmed tier requires autocorrelation |
 | 2.2 | `classifier/semantic` | `HOLD_CUE` matched from partial deltas with `transferHint`; ramp capped at 3 steps with floor enforced; A-4 passes |
 | 2.3 | Gate and suspicion | `holdSuspected` at N=1; `holdSuspectedAt` stamped; counters freeze; **A-11 passes**; **A-28 passes**; **A-3 passes** against the real playout queue |
-| 2.4 | `packages/agent` | Connects, reconfigures, `createReply` under all three ADR-022 conditions, resumes after a forced disconnect, handles a gap beyond the window per §15 |
+| 2.4 | `packages/agent` | Connects, reconfigures, `createReply` under all three ADR-022 conditions, resumes after a forced disconnect, handles a gap beyond the window per §15. **Done 2026-09-22, with one clause failing at the API: resume is refused in every form (A-8, §15); recovery after a forced disconnect works through a new session, live, in 1.8 s** |
 | 2.5 | Disclosure path | **A-12 passes** (10/10 announced transfers); **A-20 passes** (20/20 short-hold swaps against `parties_used`); **A-29 passes** |
 | 2.6 | Calibration set | All seven fixture categories in §6.6 recorded under `TELEPHONY`; `MIN_WEIGHT` operating point written down with its A-5 result |
 | 2.7 | Harness telemetry | **A-30 passes** (single-clock assumption verified) |
@@ -2928,7 +2947,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-5** | Human-detection latency feels natural at the chosen operating point | **High** | p50 < 1200 ms, p90 < 2000 ms at the `MIN_WEIGHT` satisfying A-7 |
 | **A-6** | Adaptive endpointing is preserved by never setting `min_silence` or `max_silence` | **Medium** | No fixed-timer behavior across a calibration run |
 | **A-7** | Transcript deltas over hold audio do not cause false hold exits | **High** | 20 segments × 2 announcements: **zero** false transitions. Hard constraint |
-| **A-8** | `session.resume` recovers a call, and the beyond-window path works | **Medium** | Resume inside 30 s preserves context; beyond 30 s a new session opens with context correction |
+| **A-8** | `session.resume` recovers a call, and the beyond-window path works | **Medium** | Resume inside 30 s preserves context; beyond 30 s a new session opens with context correction. **Run 2026-09-22: FIRST CLAUSE FAILS — resume refused (`session_not_found`) in every form tried, at 1.5–2.8 s. Second clause passes, live: a new session in 1.8 s, and the agent speaks on it. Context does not survive a disconnect; every disconnect is a context correction (§15)** |
 | **A-9** | The loopback link is stable across a 25-minute call | **Medium** | Zero drops; frames in order; jitter buffer within bounds |
 | **A-10** | Credit covers the project | **Medium** | Rolling average ≤ `budgetForDay(day)`; no session ever left unclosed |
 | **A-11** | The gate closes before the agent can speak when a hold begins | **Fatal** | 20 transitions with cue + 2 s pause + hold audio, plus 5 silent holds. **Zero milliseconds** of agent speech at the harness; `hold_entry_latency_ms` p90 < 800 ms |

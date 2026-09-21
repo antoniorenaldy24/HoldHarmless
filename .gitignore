@@ -15,7 +15,8 @@ hh-day0/audio/
 # Rendered harness audio assets (regenerate with scripts/render-assets.ts, §10.2)
 apps/ivr-harness/assets/
 
-# Event logs — synthetic, but noisy (§9.3)
+# Event logs and live-probe dumps — synthetic, but noisy (§9.3)
+logs/
 *.jsonl
 !hh-day0/results/*.jsonl
 
