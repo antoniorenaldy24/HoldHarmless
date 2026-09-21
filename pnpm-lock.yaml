@@ -207,6 +207,8 @@ importers:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.20.4)(tsx@4.23.13)
 
+  packages/agent: {}
+
   packages/audio: {}
 
   packages/callmodel:
@@ -214,6 +216,8 @@ importers:
       '@holdharmless/events':
         specifier: workspace:*
         version: link:../events
+
+  packages/detectors: {}
 
   packages/events: {}
 
@@ -228,6 +232,19 @@ importers:
       '@holdharmless/transport':
         specifier: workspace:*
         version: link:../transport
+
+  packages/prompts:
+    dependencies:
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+    devDependencies:
+      '@holdharmless/callmodel':
+        specifier: workspace:*
+        version: link:../callmodel
+      '@holdharmless/detectors':
+        specifier: workspace:*
+        version: link:../detectors
 
   packages/transport:
     dependencies:

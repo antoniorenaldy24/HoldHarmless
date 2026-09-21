@@ -1329,6 +1329,14 @@ Both underpin invariants, so neither may be left to the implementer.
 > **`packages/agent` therefore owns finalization.** It accumulates `transcript.agent.delta` for the active turn and emits one synthetic final on `reply.done`, which is what feeds `onTurn` and this detector. The `turn.transcribed` event and `partial` flag in §9.3 keep their meaning; what changes is who produces the final, not what a final means.
 >
 > Two properties of that construction are load-bearing. The synthetic final must be emitted on `reply.done` with `status: "completed"` **and** on `status: "interrupted"` — an interrupted reply may still have carried the disclosure sentence in full, and §8.8's rule about discarding tool results does not extend to discarding speech that was actually transmitted. And the accumulated buffer resets on `reply.started`, not on `reply.done`, so a delta arriving between the two is not lost.
+>
+> **Corrected in v1.3, by re-reading the Day-0 logs while implementing this (module 1.8).** The construction above is right in the clean case and wrong in three observed ones. Across all Day-0 logs, 81 replies carried deltas:
+>
+> - **Deltas after `reply.done`.** In every clean run the last delta precedes `reply.done` (by 1.6–5.2 s), and an API final, when present, precedes it by about 300 ms. But in `e-reply.CONTAMINATED.jsonl`, where replies overlapped, one reply's `reply.done` arrived *before any of its deltas*: they followed up to 1.6 s later, after the next `reply.started`, and its final 3.7 s later. A final emitted on `reply.done` would have been empty, and a single buffer reset on `reply.started` would have filed the text under the wrong reply. **Buffers are therefore keyed by `reply_id`**, which every delta carries, and a reply that is done with no text yet waits up to `LATE_TEXT_GRACE_MS` (4000) for it — the wait restarting on each late delta and ending at once on an API final.
+> - **A final with zero deltas.** In `e-auth2-full.jsonl`, two replies ("Please go ahead.") had a `transcript.agent` final and no deltas at all. Built from deltas alone they would not exist. **An API final, when one arrives, is used in preference to the deltas.**
+> - **Deltas without separating spaces.** Normally each delta carries its trailing space ("Got ", "it, "). In the contaminated run they did not ("I ", "need", "to", "check"), and naive concatenation gives "needtocheck" — a disclosure spelled "onbehalfof" would never match. **Deltas are joined with a space when neither side of the join has one.** Every observed delta is a whole word; if the API ever sends sub-word pieces this rule would split words, and the detector's miss rate is where that would show.
+>
+> Replies with neither deltas nor final — 28 of 59 in `e-auth2-full`, the tool-call-only replies — emit no turn. Emission is exactly once per reply; material arriving after it is reported as late, not re-emitted, so `disclosuresDelivered` cannot be counted twice for one reply. A `reply.done` with `status: "interrupted"` was never observed on Day 0; the construction handles it by the same path.
 
 A turn counts as a disclosure when it contains, case-insensitively, **both**:
 1. A self-identification phrase: `ai assistant`, `automated assistant`, `automated system`, `virtual assistant`, `a i assistant`
@@ -2330,7 +2338,10 @@ export interface PromptBundle {
   markerOrder: string[];
 }
 
-export function promptFor(ctx: PromptContext): PromptBundle;
+// v1.3: null where positionalPromptName is null (DIALING, CLOSED, any */DONE).
+// An empty bundle could still carry DISCLOSURE.txt alone at HUMAN/DONE — an
+// instruction to introduce yourself on a call whose work is over.
+export function promptFor(ctx: PromptContext): PromptBundle | null;
 
 export interface DisclosureDetector { test(agentTurn: string): boolean; }
 export interface ClosingTracker {
@@ -2451,6 +2462,7 @@ export interface HarnessSession {
 | `HARNESS_CONTROL_URL` | `ws://127.0.0.1:8081/control` | Telemetry link |
 | `PLAYOUT_DEPTH_MS` | `200` | ADR-008 |
 | `JITTER_MAX_MS` | `200` | §4.4 |
+| `LATE_TEXT_GRACE_MS` | `4000` | §7.6 — wait after `reply.done` for agent text not yet arrived. Covers the 3.7 s worst case seen on Day 0 |
 | `DTMF_TONE_MS` / `DTMF_GAP_MS` | `100` / `50` | Swept downward by E1 |
 | `HOLD_CONFIRM_MS` | `3000` | From `HOLD_CUE` to the channel transition |
 | `SEMANTIC_N` | `2` | |
