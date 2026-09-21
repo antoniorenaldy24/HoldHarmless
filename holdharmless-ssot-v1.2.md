@@ -700,6 +700,22 @@ Presets: `CLEAN` (0 ms, for unit tests), `TELEPHONY` (the defaults above, used f
 
 **Honesty boundary.** These values model documented telephony behavior. They are not a measurement of any specific network, and §1.7 says so.
 
+**The profile is only honored at 1 ms timer resolution, and Windows does not provide it by default.** Measured on the development host during module 1.3:
+
+| Requested | Default resolution | After `timeBeginPeriod(1)` |
+|---|---|---|
+| 17 ms | 31.2 ms | 17.4 ms |
+| 25 ms | 31.1 ms | 25.5 ms |
+| 33 ms | 46.8 ms | 33.5 ms |
+| Loopback under `CLEAN` | 15.2 ms | ~0 ms |
+| Loopback under `TELEPHONY` | 32.7 ms mean, **min 30.0** | **24.9 ms mean, min 17.1, max 33.4** |
+
+Windows wakes timers on a 15.625 ms quantum. At that quantum, 17 ms and 25 ms both become 31.2 ms: `TELEPHONY`'s 25 ± 8 ms collapses to about 31 ± 1 ms, **the jitter distribution is erased entirely**, and `CLEAN` becomes 15 ms rather than zero. The jitter buffer would have nothing to absorb — the exact condition this section exists to prevent — and every figure reported "under `TELEPHONY`" would have been measured under a different, undocumented profile.
+
+That is `INV-16`'s failure arriving from the host rather than from configuration, which is why it is worth stating: no amount of care in choosing the profile would have caught it.
+
+**The remedy is `raiseTimerResolution()` in `packages/transport`**, which calls `timeBeginPeriod(1)` on Windows and is a no-op elsewhere. Since Windows 10 version 2004 the setting is **per process**, so it cannot be inherited from another application that happens to have raised it: `apps/core` and `apps/ivr-harness` must each call it at startup. `measureTimerAccuracy()` verifies the result, and the transport test suite asserts it as a precondition before any delay figure is trusted.
+
 ---
 
 ## 5. The call model
@@ -2402,6 +2418,7 @@ pnpm --filter dashboard dev
 - [ ] `packages/fixtures` excluded from the public repository
 - [ ] `check-invariants.ts` and `check-doc-claims.ts` green in CI
 - [ ] For a live demo: E3 re-measured on the host being demoed from (ADR-003)
+- [ ] **On Windows:** both processes log `timer resolution: raised from 15.625 ms to 1 ms` at startup. Without it the network profile is not applied and no latency figure from that run may be reported (§4.5)
 
 ---
 

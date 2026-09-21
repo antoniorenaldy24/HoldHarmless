@@ -10,11 +10,8 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
     "isolatedModules": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
+    "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "verbatimModuleSyntax": true
+    "noEmit": true
   }
 }

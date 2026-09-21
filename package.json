@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "node --import tsx --test packages/*/test/*.test.ts",
     "check:invariants": "tsx scripts/check-invariants.ts",
     "check:doc": "tsx scripts/check-doc-claims.ts",

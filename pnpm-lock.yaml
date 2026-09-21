@@ -46,7 +46,37 @@ importers:
         specifier: ^6.0.0
         version: 6.4.3(@types/node@22.20.4)(tsx@4.23.13)
 
+  packages/audio: {}
+
   packages/events: {}
+
+  packages/transport:
+    dependencies:
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+      koffi:
+        specifier: ^2.16.3
+        version: 2.16.3
+
+  packages/transport-loopback:
+    dependencies:
+      '@holdharmless/audio':
+        specifier: workspace:*
+        version: link:../audio
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+      '@holdharmless/transport':
+        specifier: workspace:*
+        version: link:../transport
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
 
 packages:
 
@@ -635,6 +665,9 @@ packages:
   '@types/react@19.3.0':
     resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
 
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+
   '@vitejs/plugin-react@4.7.0':
     resolution: {integrity: sha512-gUu9hwfWvvEDBBmgtAowQCojwZmJ5mcLn3aufeCsitijs3+f2NsrPtlAWIR6OPiqljl96GVCUbLe0HyqIpVaoA==}
     engines: {node: ^14.18.0 || >=16.0.0}
@@ -719,6 +752,9 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  koffi@2.16.3:
+    resolution: {integrity: sha512-E9y1AsgYGlaxMhcZzHr8y96QF2U5XzA12GGVAfbWqIubTwPNMXQarfBzePNXHe0xtIEtNd6ifAv3GAKYGUeBAQ==}
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
@@ -836,6 +872,18 @@ packages:
       tsx:
         optional: true
       yaml:
+        optional: true
+
+  ws@8.21.3:
+    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
         optional: true
 
   yallist@3.1.1:
@@ -1245,6 +1293,10 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 22.20.4
+
   '@vitejs/plugin-react@4.7.0(vite@6.4.3(@types/node@22.20.4)(tsx@4.23.13))':
     dependencies:
       '@babel/core': 7.29.7
@@ -1356,6 +1408,8 @@ snapshots:
 
   json5@2.2.3: {}
 
+  koffi@2.16.3: {}
+
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
@@ -1456,5 +1510,7 @@ snapshots:
       '@types/node': 22.20.4
       fsevents: 2.3.3
       tsx: 4.23.13
+
+  ws@8.21.3: {}
 
   yallist@3.1.1: {}

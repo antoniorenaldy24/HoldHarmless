@@ -1,0 +1,13 @@
+{
+  "name": "@holdharmless/transport",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holdharmless/events": "workspace:*",
+    "koffi": "^2.16.3"
+  }
+}
