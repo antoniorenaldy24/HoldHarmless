@@ -34,12 +34,15 @@ import {
   HarnessServer,
   Pacer,
   checkAssets,
+  clockOffsetMs,
+  compareClocks,
   connectControl,
   fileAssets,
   holdMusicPcm,
   lineFile,
   parseSpokenChoice,
   renderKey,
+  spreadOf,
   holdMusicKey,
   type AssetSource,
   type LineId,
@@ -528,6 +531,39 @@ describe('the harness over the loopback transport', () => {
     await sleep(100 * (MAX_REPEATS + 2) + 300);
     assert.deepEqual(telemetry.filter((m) => m.callId === 'SYN-CALL-drop' && m.metric === 'menu_abandoned'), []);
     control.close();
+  });
+
+  test('the one-sample offset estimate is arithmetic, checked against known numbers', () => {
+    // A clock 200 ms ahead, seen across a 10 ms round trip, reads as 195 ms.
+    assert.equal(clockOffsetMs(1000, 1200, 1010), 195);
+    // Two clocks that agree: zero, whatever the round trip.
+    assert.equal(clockOffsetMs(1000, 1005, 1010), 0);
+    assert.equal(clockOffsetMs(1000, 990, 1010), -15);
+    assert.equal(spreadOf([1, 5, 3]), 4);
+    assert.equal(spreadOf([7]), 0);
+    assert.equal(spreadOf([]), 0);
+  });
+
+  test('A-30: core and harness share one clock — 100 exchanges during an active call', async () => {
+    // ADR-001 says both processes run on one host and telemetry therefore needs
+    // no offset estimation. This is the sentence as a number. The exchanges run
+    // WHILE a call is up, because an idle process is not what the claim covers.
+    const h = await start();
+    const c = await startCall(h, 'SYN-CALL-clock');
+    await waitFor('main menu', () => c.heard.includes('ivr_main_menu'));
+    const ws = await connectControl(h.controlUrl(), () => {});
+    const result = await compareClocks(ws, 100);
+    ws.close();
+
+    console.log(`      A-30: ${result.samples} exchanges, spread ${result.spreadMs.toFixed(1)} ms, median offset ${result.medianOffsetMs.toFixed(1)} ms, max round trip ${result.maxRoundTripMs.toFixed(1)} ms`);
+    assert.equal(result.samples, 100);
+    // The reported spread must come from the samples reported beside it, or a
+    // constant would pass the threshold below without measuring anything.
+    assert.equal(result.spreadMs, spreadOf(result.offsetsMs));
+    assert.equal(result.offsetsMs.length, 100);
+    assert.ok(result.spreadMs < 2, `clock spread was ${result.spreadMs.toFixed(1)} ms — offset estimation would be needed`);
+    assert.ok(Math.abs(result.medianOffsetMs) < 2, `median offset ${result.medianOffsetMs.toFixed(1)} ms`);
+    await c.close();
   });
 
   test('a line can only be spoken by the persona whose voice rendered it', async () => {

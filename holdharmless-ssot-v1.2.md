@@ -2001,6 +2001,8 @@ The harness knows things the core cannot. It reports them over a **separate cont
 
 **Time base.** Both processes run on one host and share one system clock (ADR-001), so no offset estimation is required. `A-30` verifies that assumption once rather than assuming it.
 
+**Verified in v1.3 (module 2.7).** The control channel answers a `time.ping` inline with a `time.pong` carrying the harness clock; the core estimates the offset per exchange with half the round trip removed. Measured during an active call: 100 exchanges, spread 1.0 ms, median offset 0.0 ms. The arithmetic is a pure function tested against known numbers, because on one host a routine that simply returned zero would pass every threshold — which is what the first version of the test allowed, and what a mutation caught.
+
 ### 10.5 Capabilities
 
 Each exists because some specific system behavior cannot be validated without it.
@@ -2951,7 +2953,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | 2.4 | `packages/agent` | Connects, reconfigures, `createReply` under all three ADR-022 conditions, resumes after a forced disconnect, handles a gap beyond the window per §15. **Done 2026-09-22, with one clause failing at the API: resume is refused in every form (A-8, §15); recovery after a forced disconnect works through a new session, live, in 1.8 s** |
 | 2.5 | Disclosure path | **A-12 passes** (10/10 announced transfers); **A-20 passes** (20/20 short-hold swaps against `parties_used`); **A-29 passes**. **Partly done 2026-09-23: the path is built and A-29 passes over 1408 rendered combinations. A-12 and A-20 compare against harness ground truth over whole calls in which the MODEL speaks, so they need the week-3 call loop and live credit; they are NOT run** |
 | 2.6 | Calibration set | All seven fixture categories in §6.6 recorded under `TELEPHONY`; `MIN_WEIGHT` operating point written down with its A-5 result |
-| 2.7 | Harness telemetry | **A-30 passes** (single-clock assumption verified) |
+| 2.7 | Harness telemetry | **A-30 passes** (single-clock assumption verified). **Done 2026-09-23: `time.ping`/`time.pong` on the control channel, spread 1.0 ms across 100 exchanges** |
 
 ### Week 3 — workflow and data integrity
 
@@ -3011,7 +3013,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-27** | `HOLD_CUE` phrases spoken without a hold do not mute the agent excessively | **Major** | 20 utterances of "let me check" with the persona continuing. `gate_false_close_count` recorded; `agent_mute_during_conversation_ms` p90 < 1500 ms |
 | **A-28** | An unannounced hold does not end the call before acoustic confirmation | **Fatal** | 10 holds with `holdCueProbability = 0`, from both phases. **Zero** transitions to `CLOSED` or `CLOSING` before the channel reaches `HOLD`. **Run 2026-09-23 as a unit test over a 20 s unannounced hold: not closed with the freeze, and closed without it — the same test proves the mechanism is what prevents it.** The harness-driven version with both phases belongs to module 2.6 |
 | **A-29** | A hedged prompt never contains contradictory instructions | **Fatal to ethical credibility** | Static render of every `(channel, phase, hedged, disclosed)` combination, plus 10 live calls with 20–40 s holds. Zero prompts containing both files; disclosure delivered 10/10. **Static half run 2026-09-23: 1408 combinations rendered, 64 of them hedged, zero containing both files — and every hedged prompt still carries both the disclosure and the "do not repeat yourself" clause, so the check is not vacuous. The 10 live calls remain** |
-| **A-30** | Core and harness share one clock, so no offset estimation is needed | **Minor** | 100 timestamp exchanges during an active call; observed spread under 2 ms |
+| **A-30** | Core and harness share one clock, so no offset estimation is needed | **Minor** | 100 timestamp exchanges during an active call; observed spread under 2 ms. **Run 2026-09-23 during an active call: 100 exchanges, spread 1.0 ms, median offset 0.0 ms, round trip at most 1.0 ms — repeated five times, identical.** `Date.now()` has 1 ms resolution, so a 1.0 ms spread is this instrument's floor: the strongest statement it can make is that no offset is measurable |
 | **A-31** | The agent does not volunteer unrequested fields | **Major** | 20 `REALISTIC` calls; compare `fields_requested` with `get_auth_request` returns. `over_disclosure_count = 0` in 18/20, each exception carrying a transcript quote |
 | **A-32** | The system survives a degraded network profile | **Medium** | One full run under `DEGRADED`. No crash; fault counters non-zero and bounded; call completes or fails cleanly |
 | **A-33** | Latency from the demo host is acceptable | **High** | **Day-0 half measured 2026-09-21** on the local Windows 11 host: API segment 397 ms median, 437 ms p90. With the loopback, jitter-buffer and playout terms of §4.2 on top, the 2500 ms p90 ceiling has wide margin. Full `perceived_response_ms` awaits the harness in week 1, and E3 must be **re-run on whatever host gives the demo** |
