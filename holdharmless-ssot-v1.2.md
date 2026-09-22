@@ -989,6 +989,13 @@ Runs on each `transcript.user.delta`. Output: `{IVR_PROMPT, HUMAN, HOLD_CUE}`.
 
 **Why disfluency carries almost no weight.** AssemblyAI removes filler words by default, and enabling them risks the model emitting fillers never spoken. The stronger reason needs no documentation: **pre-rendered speech never disfluences, and a person reading a script barely does.** The harness's `BOT_REP` mode is rendered audio and `HUMAN_REP` is a team member reading a script, so this signal is near zero in both modes that actually run.
 
+**As built in v1.3 (module 2.2), and what measuring it changed.**
+
+- **Signal weights:** hold cue 1.0 (decisive), menu language 0.35, responsiveness 0.30, conversational 0.15, turn-length variance 0.10, disfluency 0.05 — renormalized over whichever signals are available (§6.4). A result must clear the effective `MIN_WEIGHT` **and** lead the next class by `CLASSIFIER_MARGIN`; otherwise it is `UNKNOWN`. One bar would report a 0.46/0.45 split as a decision.
+- **"Menu language" had to grow into "recorded-announcement language".** With only *press*, *say* and *menu* it scored zero on "Your call may be monitored or recorded" and on "Please enter the ten digit provider NPI", which then read as `HUMAN` through the absence rule — the one error A-4 forbids outright. The opening shape of a menu item ("For eligibility and benefits, …") counts as well, because four words in, that is all a delta has.
+- **"You" and "your" are not evidence of a human.** A recorded announcement uses them as freely as a person does ("your call may be monitored", "if you know your party's extension"). Only first-person forms and conversational markers count. Removing them fixed five A-4 errors.
+- **Responsiveness is only meaningful when a person could be the one replying.** In speech navigation mode the *menu* answers the agent within seconds, and reporting that as agent speech makes a four-word menu opening read `HUMAN` — measured, and now stated on the interface: the Call Model reports agent speech, and never while navigating an IVR.
+
 **A structural gap this layer must live with.** The highest-weighted `HUMAN` signal — responsiveness to the agent's own speech — is unavailable during hold, because the agent is designed to be silent. Inside `HOLD`, the classifier operates on its weaker signals alone. §6.7 states how that is handled rather than leaving it implicit.
 
 ### 6.3 `HOLD_CUE` phrase list
@@ -2227,6 +2234,11 @@ export interface HoldCuePhrase { phrase: string; transferHint: boolean; }
 export const HOLD_CUE_PHRASES: readonly HoldCuePhrase[];
 ```
 
+**Two corrections from building it (v1.3, module 2.2).**
+
+- **`rampSensitivity` lowers `MIN_WEIGHT`, it does not raise it.** The comment above says "Raises MIN_WEIGHT one step, never below the floor", which cannot both raise a number and keep it above a floor. §6.7 says the action raises *sensitivity* and §6.8 says the layer runs "during HOLD at elevated `MIN_WEIGHT`". As built: entering `HOLD` raises the bar (a hold is hard to leave — A-7 is the hard constraint), each of at most three ramp steps lowers it back toward `MIN_WEIGHT_FLOOR`, and a new hold starts elevated again.
+- **Two methods this interface needs and does not have:** `noteAgentSpoke(atMs)`, without which the highest-weighted `HUMAN` signal in §6.2 — responsiveness to the agent's own speech — has no input; and `endTurn()`, without which turn-length variance has nothing to compare. Both are the Call Model's to call.
+
 ### 12.5 `packages/callmodel`
 
 ```typescript
@@ -2925,7 +2937,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | # | Module | Acceptance criteria |
 |---|---|---|
 | 2.1 | `classifier/acoustic` | Emits at 250 ms; provisional tier fires within 1.5 s of hold audio onset; confirmed tier requires autocorrelation. **Done 2026-09-23: PERIODIC 1000 ms after hold onset, still provisional; confirmed only once the 20 s window is full and the peak supports it** |
-| 2.2 | `classifier/semantic` | `HOLD_CUE` matched from partial deltas with `transferHint`; ramp capped at 3 steps with floor enforced; A-4 passes |
+| 2.2 | `classifier/semantic` | `HOLD_CUE` matched from partial deltas with `transferHint`; ramp capped at 3 steps with floor enforced; A-4 passes. **Done 2026-09-23; A-4 on a hand-written corpus, see §20** |
 | 2.3 | Gate and suspicion | `holdSuspected` at N=1; `holdSuspectedAt` stamped; counters freeze; **A-11 passes**; **A-28 passes**; **A-3 passes** against the real playout queue |
 | 2.4 | `packages/agent` | Connects, reconfigures, `createReply` under all three ADR-022 conditions, resumes after a forced disconnect, handles a gap beyond the window per §15. **Done 2026-09-22, with one clause failing at the API: resume is refused in every form (A-8, §15); recovery after a forced disconnect works through a new session, live, in 1.8 s** |
 | 2.5 | Disclosure path | **A-12 passes** (10/10 announced transfers); **A-20 passes** (20/20 short-hold swaps against `parties_used`); **A-29 passes** |
@@ -2964,7 +2976,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-1** | Goertzel decodes synthesized DTMF reliably across the transport | **Major** | **CLOSED by E1, 2026-09-22.** 20/20 at 100/50 ms under `TELEPHONY` in 5 of 5 trials at five sub-frame offsets, and under `DEGRADED`. Lowest passing: 50/40 ms. See ADR-013 for the two limits the sweep found |
 | **A-2** | `audio/pcmu` both directions is intelligible with accurate transcription | **High** | **CLOSED 2026-09-21.** Accepted both directions. Member ID, spelled letter, CPT `96413` and ICD `C50.911` transcribed identically at 8 kHz and 24 kHz. One gap, recorded rather than smoothed over: the date-of-birth **year** was lost entirely at 8 kHz and garbled at 24 kHz ("1980. 1968."). One sample at default `transcription_mode` — not a measurement, but `patient_dob` is a §8.1 field and a missing year is a silent failure. Follow-up in week 1 |
 | **A-3** | `clear` empties the playout queue and stops audio within 300 ms | **High** | Queue reports zero unplayed agent frames; audible audio stops within 300 ms; returned marks match discarded chunks |
-| **A-4** | The semantic layer separates `HUMAN` from `IVR_PROMPT` on partial deltas | **High** | ≥90% correct; **zero** IVR prompts classified as `HUMAN` |
+| **A-4** | The semantic layer separates `HUMAN` from `IVR_PROMPT` on partial deltas | **High** | ≥90% correct; **zero** IVR prompts classified as `HUMAN`. **Run 2026-09-23 on a hand-written corpus (20 IVR lines, 20 representative lines, scored at 4 words, 8 words and in full — 102 cases): 102/102, zero IVR as HUMAN.** The corpus is ours, so this measures the rule set against examples we wrote; the number that counts comes from the §6.6 calibration set (module 2.6) |
 | **A-5** | Human-detection latency feels natural at the chosen operating point | **High** | p50 < 1200 ms, p90 < 2000 ms at the `MIN_WEIGHT` satisfying A-7 |
 | **A-6** | Adaptive endpointing is preserved by never setting `min_silence` or `max_silence` | **Medium** | No fixed-timer behavior across a calibration run |
 | **A-7** | Transcript deltas over hold audio do not cause false hold exits | **High** | 20 segments × 2 announcements: **zero** false transitions. Hard constraint |
