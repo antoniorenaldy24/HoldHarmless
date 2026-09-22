@@ -273,6 +273,22 @@ importers:
       '@holdharmless/events':
         specifier: workspace:*
         version: link:../events
+    devDependencies:
+      '@holdharmless/audio':
+        specifier: workspace:*
+        version: link:../audio
+      '@holdharmless/classifier':
+        specifier: workspace:*
+        version: link:../classifier
+      '@holdharmless/ivr-harness':
+        specifier: workspace:*
+        version: link:../../apps/ivr-harness
+      '@holdharmless/transport':
+        specifier: workspace:*
+        version: link:../transport
+      '@holdharmless/transport-loopback':
+        specifier: workspace:*
+        version: link:../transport-loopback
 
   packages/classifier:
     dependencies:

@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "@holdharmless/events": "workspace:*" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holdharmless/events": "workspace:*"
+  },
+  "devDependencies": {
+    "@holdharmless/audio": "workspace:*",
+    "@holdharmless/transport": "workspace:*",
+    "@holdharmless/transport-loopback": "workspace:*",
+    "@holdharmless/classifier": "workspace:*",
+    "@holdharmless/ivr-harness": "workspace:*"
+  }
 }
