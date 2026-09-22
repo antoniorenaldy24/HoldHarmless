@@ -274,6 +274,19 @@ importers:
         specifier: workspace:*
         version: link:../events
 
+  packages/classifier:
+    dependencies:
+      '@holdharmless/audio':
+        specifier: workspace:*
+        version: link:../audio
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../events
+    devDependencies:
+      '@holdharmless/ivr-harness':
+        specifier: workspace:*
+        version: link:../../apps/ivr-harness
+
   packages/detectors: {}
 
   packages/events: {}

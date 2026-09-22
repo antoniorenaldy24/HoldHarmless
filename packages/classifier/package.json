@@ -1,0 +1,12 @@
+{
+  "name": "@holdharmless/classifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@holdharmless/audio": "workspace:*",
+    "@holdharmless/events": "workspace:*"
+  },
+  "devDependencies": { "@holdharmless/ivr-harness": "workspace:*" }
+}

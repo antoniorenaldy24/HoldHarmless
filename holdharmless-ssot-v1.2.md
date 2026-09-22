@@ -952,6 +952,25 @@ Runs locally every 250 ms. No API cost. Output: `{SILENCE, PERIODIC, SPEECH_LIKE
 
 Three classes only, because three is what energy, pause structure, and periodicity can prove. **This layer cannot distinguish a human from an IVR prompt** — both are speech. That limitation is why a second layer exists.
 
+**Measured values, from module 2.1.** The thresholds in `packages/classifier` are set from these, not chosen: the signals were run over the harness's own audio.
+
+| Source | Pause ratio | Spectral flatness | Autocorrelation |
+|---|---|---|---|
+| Hold music | 0.00 | 0.0015 | 0.60 |
+| DTMF tones | 0.26 | 0.0095 | 0.93 |
+| IVR menu (rendered) | 0.43 | 0.1447 | 0.01 |
+| Representative lines (rendered) | 0.40–0.46 | 0.008–0.043 | 0.02–0.05 |
+| Silence | 1.00 | 1.00 | 0.00 |
+
+**Pause ratio is the strong signal and spectral flatness is the weak one.** Pause ratio separates hold audio from speech completely (0.00 against 0.40+); flatness separates them by a factor of five at best — the quietest rendered voice measures 0.0077 against music's 0.0015 — so it is read on a log scale and weighted below pause ratio. Weights: pause 0.45, RMS 0.20, flatness 0.20, autocorrelation 0.15, renormalized over whichever signals have enough audio (§6.4).
+
+**A partially filled window is still a measurement, except for autocorrelation.** Each signal is used once it holds half its window — a pause ratio over 1 s is a pause ratio — which is what lets the provisional tier fire within 1.5 s of hold onset although its longest window is 2 s. Autocorrelation is the exception and needs its full 20 s: a short window cannot tell a loop from a long note.
+
+**Two limits found by measurement, both stated rather than papered over.**
+
+- **Speech over continuous background music reads as PERIODIC.** Music under the speech fills every pause, and the pause signal is the strongest one here. Only the semantic layer can separate them, which is the division of labor this section already describes.
+- **A looping recorded announcement has a loop.** It is periodic audio and it is still speech, which is why the confirmed tier checks the *winner* as well as the autocorrelation peak. §10.5's mid-hold announcements are exactly this case.
+
 ### 6.2 Semantic layer
 
 Runs on each `transcript.user.delta`. Output: `{IVR_PROMPT, HUMAN, HOLD_CUE}`.
@@ -1929,7 +1948,9 @@ All `BOT_REP` and IVR speech is **pre-rendered to μ-law 8 kHz files, offline, b
 
 `scripts/render-assets.ts` renders the script to files from a chosen TTS at build time. The renderer is not part of the runtime and may be swapped freely.
 
-**Hold audio** is a looping music file plus periodic announcement files, deliberately loopable so the 20-second autocorrelation signal has something real to detect. (v1.3: the music is generated, not recorded — a 16-second chord loop with an arpeggio, deterministic to the byte and free of any licence, with no click at the loop point.)
+**Hold audio** is a looping music file plus periodic announcement files, deliberately loopable so the 20-second autocorrelation signal has something real to detect. (v1.3: the music is generated, not recorded — deterministic to the byte and free of any licence.)
+
+**Two properties the music must have, both got wrong first and fixed in module 2.1 by measuring §6.1's signals against it.** It must be **continuous**: the first version was a plucked arpeggio decaying into silence, giving a pause ratio of 0.31 against speech's 0.43 — almost no separation on the signal the acoustic layer leans on. It is now a sustained pad, measuring 0.00. And its loop must fit the **autocorrelation window twice**: the first version looped every 16 s while the window searches lags of 1–10 s, so the loop was invisible and the peak came from the chord rhythm (0.21). The loop is now 8 s, measuring 0.60.
 
 **Voices, as rendered (v1.3):** IVR `en-US-AriaNeural` at −10%, first representative `en-US-AndrewNeural` at −15% (chosen by ear on Day 0), second representative `en-GB-SoniaNeural` at −15% — different accent and gender from the first, so the two are not near neighbours for party detection. `pnpm render-assets` is incremental: a manifest records what each file was rendered from, and a stale file is refused at startup rather than played.
 
@@ -2903,7 +2924,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 
 | # | Module | Acceptance criteria |
 |---|---|---|
-| 2.1 | `classifier/acoustic` | Emits at 250 ms; provisional tier fires within 1.5 s of hold audio onset; confirmed tier requires autocorrelation |
+| 2.1 | `classifier/acoustic` | Emits at 250 ms; provisional tier fires within 1.5 s of hold audio onset; confirmed tier requires autocorrelation. **Done 2026-09-23: PERIODIC 1000 ms after hold onset, still provisional; confirmed only once the 20 s window is full and the peak supports it** |
 | 2.2 | `classifier/semantic` | `HOLD_CUE` matched from partial deltas with `transferHint`; ramp capped at 3 steps with floor enforced; A-4 passes |
 | 2.3 | Gate and suspicion | `holdSuspected` at N=1; `holdSuspectedAt` stamped; counters freeze; **A-11 passes**; **A-28 passes**; **A-3 passes** against the real playout queue |
 | 2.4 | `packages/agent` | Connects, reconfigures, `createReply` under all three ADR-022 conditions, resumes after a forced disconnect, handles a gap beyond the window per §15. **Done 2026-09-22, with one clause failing at the API: resume is refused in every form (A-8, §15); recovery after a forced disconnect works through a new session, live, in 1.8 s** |

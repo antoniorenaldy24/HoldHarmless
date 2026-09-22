@@ -7,8 +7,8 @@
  * byte for byte with no conversion in the audio path.
  *
  * Incremental: manifest.json records what each file was rendered from, and a
- * line is re-rendered only when its text, voice or rate changed. The hold music
- * is generated (hold-music.ts), not synthesized.
+ * line is re-rendered only when its text, voice, rate or RENDER_VERSION changed.
+ * The hold music is generated (hold-music.ts), not synthesized.
  *
  *   pnpm render-assets            render what is missing or stale
  *   pnpm render-assets --force    render everything
@@ -99,7 +99,10 @@ for (const id of LINE_IDS) {
 
   // `--rate=-15%`, not `--rate -15%`: argparse reads a leading minus as a flag.
   run('edge-tts', ['--voice', voice, `--rate=${rate}`, '--text', text, '--write-media', mp3]);
-  run('ffmpeg', ['-y', '-loglevel', 'error', '-i', mp3, '-ar', '8000', '-ac', '1', '-f', 'mulaw', out]);
+  // loudnorm (EBU R128) before the downsample, so the three voices arrive at one
+  // level (about 3.6 dB apart as rendered, about 1 dB after). The acoustic
+  // layer's RMS signal (§6.1) should measure the audio, not which role is speaking.
+  run('ffmpeg', ['-y', '-loglevel', 'error', '-i', mp3, '-af', 'loudnorm=I=-19:TP=-2:LRA=11', '-ar', '8000', '-ac', '1', '-f', 'mulaw', out]);
 
   const bytes = fs.statSync(out).size;
   if (bytes === 0) throw new Error(`${id}: ffmpeg produced an empty file`);
