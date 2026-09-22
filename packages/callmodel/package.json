@@ -7,13 +7,15 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@holdharmless/events": "workspace:*"
+    "@holdharmless/events": "workspace:*",
+    "@holdharmless/detectors": "workspace:*"
   },
   "devDependencies": {
     "@holdharmless/audio": "workspace:*",
     "@holdharmless/transport": "workspace:*",
     "@holdharmless/transport-loopback": "workspace:*",
     "@holdharmless/classifier": "workspace:*",
-    "@holdharmless/ivr-harness": "workspace:*"
+    "@holdharmless/ivr-harness": "workspace:*",
+    "@holdharmless/prompts": "workspace:*"
   }
 }

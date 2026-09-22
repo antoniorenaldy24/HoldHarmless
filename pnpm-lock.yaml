@@ -270,6 +270,9 @@ importers:
 
   packages/callmodel:
     dependencies:
+      '@holdharmless/detectors':
+        specifier: workspace:*
+        version: link:../detectors
       '@holdharmless/events':
         specifier: workspace:*
         version: link:../events
@@ -283,6 +286,9 @@ importers:
       '@holdharmless/ivr-harness':
         specifier: workspace:*
         version: link:../../apps/ivr-harness
+      '@holdharmless/prompts':
+        specifier: workspace:*
+        version: link:../prompts
       '@holdharmless/transport':
         specifier: workspace:*
         version: link:../transport
