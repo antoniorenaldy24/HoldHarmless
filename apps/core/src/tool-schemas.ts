@@ -76,6 +76,11 @@ export const TOOL_SCHEMAS: readonly ToolSchema[] = [
     parameters: {
       type: 'object',
       properties: {
+        // NO `pattern` HERE, and that is a measured decision (A-24, 2026-09-24).
+        // ADR-020 suggested one as a lever for entity-aware waiting; with
+        // '^[A-Z0-9-]{3,20}$' the model heard the number correctly and then did
+        // not call the tool at all in 19 of 20 cases. The cost was not a worse
+        // value, it was no value.
         value: { type: 'string', minLength: 3, description: 'The authorization number exactly as the representative said it.' },
         spoken_form: { type: 'string', description: 'Optional: how they said it, if it differed from the value. Diagnostics only.' },
       },

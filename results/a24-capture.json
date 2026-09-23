@@ -1,0 +1,377 @@
+{
+  "experiment": "A-24 at scale",
+  "ranAt": "2026-09-23T22:32:16.135Z",
+  "count": 20,
+  "levers": {
+    "transcriptionPrompt": "A health plan representative is reading an alphanumeric prior authorization number aloud, letter by letter and digit by digit, using phrases like \"A as in alpha\" and \"dash\". Transcribe each digit exactly as spoken and do not group digits into larger numbers.",
+    "pattern": "^[A-Z0-9-]{3,20}$"
+  },
+  "results": {
+    "baseline": [
+      {
+        "value": "C965-96",
+        "captured": "C965-96",
+        "transcript": "Okay, your authorization number is C as in Charlie 965-96.",
+        "exact": true
+      },
+      {
+        "value": "PA4921679",
+        "captured": "PA4921679",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 4921679.",
+        "exact": true
+      },
+      {
+        "value": "QA5393",
+        "captured": "QA5393",
+        "transcript": "Author is Q as in Quebec, A as in Alpha, 5393.",
+        "exact": true
+      },
+      {
+        "value": "Q109-64",
+        "captured": "Q109-64",
+        "transcript": "Author is Q as in Quebec, 109-64.",
+        "exact": true
+      },
+      {
+        "value": "PA3990185",
+        "captured": "PA3990185",
+        "transcript": "Author is P as in Papa, A as in Alpha, 3990185.",
+        "exact": true
+      },
+      {
+        "value": "HH4154",
+        "captured": "HH4154",
+        "transcript": "Author is H as in hotel, H as in hotel, 4154.",
+        "exact": true
+      },
+      {
+        "value": "Q919-80",
+        "captured": "Q919-80",
+        "transcript": "Author is Q as in Quebec, 919-80.",
+        "exact": true
+      },
+      {
+        "value": "PA4671432",
+        "captured": "PA4671432",
+        "transcript": "Offer is P as in Papa, A as in Alpha, 4671432.",
+        "exact": true
+      },
+      {
+        "value": "CJ7762",
+        "captured": "CJ7762",
+        "transcript": "Offer is C as in Charlie, J as in Juliet, 7762.",
+        "exact": true
+      },
+      {
+        "value": "L196-06",
+        "captured": "L196-06",
+        "transcript": "Offer is L as in Lima, 196-06.",
+        "exact": true
+      },
+      {
+        "value": "PA8791010",
+        "captured": "PA8791010",
+        "transcript": "Offer is P as in Papa, A as in Alpha, 8791010.",
+        "exact": true
+      },
+      {
+        "value": "LM0522",
+        "captured": "LM0522",
+        "transcript": "Offer is L as in Lima, M as in Mike, 0522.",
+        "exact": true
+      },
+      {
+        "value": "H741-62",
+        "captured": "H741-62",
+        "transcript": "Offer is H as in hotel, 741-62.",
+        "exact": true
+      },
+      {
+        "value": "PA6910269",
+        "captured": "PA6910269",
+        "transcript": "Offer is P as in Papa, A as in Alpha, 6910269.",
+        "exact": true
+      },
+      {
+        "value": "LE9799",
+        "captured": "LE9799",
+        "transcript": "Offer is L as in Lima, E as in Echo, 9799.",
+        "exact": true
+      },
+      {
+        "value": "Q268-21",
+        "captured": "Q268-21",
+        "transcript": "Offer is Q as in Quebec, 268-21.",
+        "exact": true
+      },
+      {
+        "value": "PA9874150",
+        "captured": "PA9874150",
+        "transcript": "Offer is P as in Papa, A as in Alpha, 9874150.",
+        "exact": true
+      },
+      {
+        "value": "XF6601",
+        "captured": "XF6601",
+        "transcript": "Or is it X as in X-ray? F as in Foxtrot, 6601.",
+        "exact": true
+      },
+      {
+        "value": "M514-62",
+        "captured": "M514-62",
+        "transcript": "Your authorization number is M as in Mike, 514-62.",
+        "exact": true
+      },
+      {
+        "value": "PA1946721",
+        "captured": "PA1946721",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 1946721.",
+        "exact": true
+      }
+    ],
+    "prompt": [
+      {
+        "value": "C965-96",
+        "captured": "C965-96",
+        "transcript": "Okay. Your authorization number is C as in Charlie, 965-96.",
+        "exact": true
+      },
+      {
+        "value": "PA4921679",
+        "captured": "PA4921679",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 4921679.",
+        "exact": true
+      },
+      {
+        "value": "QA5393",
+        "captured": "QA5393",
+        "transcript": "Your authorization number is Q as in Quebec, A as in Alpha, 5393.",
+        "exact": true
+      },
+      {
+        "value": "Q109-64",
+        "captured": "Q109-64",
+        "transcript": "Your authorization number is Q as in Quebec, 109-64.",
+        "exact": true
+      },
+      {
+        "value": "PA3990185",
+        "captured": "PA3990185",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 3990185.",
+        "exact": true
+      },
+      {
+        "value": "HH4154",
+        "captured": "HH4154",
+        "transcript": "Your authorization number is H as in hotel, H as in hotel, 4154.",
+        "exact": true
+      },
+      {
+        "value": "Q919-80",
+        "captured": "Q919-80",
+        "transcript": "Your authorization number is Q as in Quebec, 919-80.",
+        "exact": true
+      },
+      {
+        "value": "PA4671432",
+        "captured": "PA4671432",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 4671432.",
+        "exact": true
+      },
+      {
+        "value": "CJ7762",
+        "captured": "CJ7762",
+        "transcript": "Your authorization number is C as in Charlie, J as in Juliet, 7762.",
+        "exact": true
+      },
+      {
+        "value": "L196-06",
+        "captured": "L196-06",
+        "transcript": "Your authorization number is L as in Lima, 196-06.",
+        "exact": true
+      },
+      {
+        "value": "PA8791010",
+        "captured": "PA8791010",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 8791010.",
+        "exact": true
+      },
+      {
+        "value": "LM0522",
+        "captured": "LM0522",
+        "transcript": "Your authorization number is L as in Lima, M as in Mike, 0522.",
+        "exact": true
+      },
+      {
+        "value": "H741-62",
+        "captured": "H741-62",
+        "transcript": "Your authorization number is H as in hotel, 741-62.",
+        "exact": true
+      },
+      {
+        "value": "PA6910269",
+        "captured": "PA6910269",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 6910269.",
+        "exact": true
+      },
+      {
+        "value": "LE9799",
+        "captured": "LE9799",
+        "transcript": "Your authorization number is L as in Lima, E as in Echo, 9799.",
+        "exact": true
+      },
+      {
+        "value": "Q268-21",
+        "captured": "Q268-21",
+        "transcript": "Your authorization number is Q as in Quebec, 268-21.",
+        "exact": true
+      },
+      {
+        "value": "PA9874150",
+        "captured": "PA9874150",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 9874150.",
+        "exact": true
+      },
+      {
+        "value": "XF6601",
+        "captured": "XF6601",
+        "transcript": "Your authorization number is X as in X-ray. F as in foxtrot. 6601.",
+        "exact": true
+      },
+      {
+        "value": "M514-62",
+        "captured": "M514-62",
+        "transcript": "Your authorization number is M as in Mike, 514-62.",
+        "exact": true
+      },
+      {
+        "value": "PA1946721",
+        "captured": "PA1946721",
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 1946721.",
+        "exact": true
+      }
+    ],
+    "pattern": [
+      {
+        "value": "C965-96",
+        "captured": "C965-96",
+        "transcript": "Okay, your authorization number is C as in Charlie 965-96.",
+        "exact": true
+      },
+      {
+        "value": "PA4921679",
+        "captured": null,
+        "transcript": "Your authorization number is P as in Papa, A as in Alpha, 4921679.",
+        "exact": false
+      },
+      {
+        "value": "QA5393",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is Q as in Quebec, A as in Alpha, 5393.",
+        "exact": false
+      },
+      {
+        "value": "Q109-64",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is Q as in Quebec 109-64.",
+        "exact": false
+      },
+      {
+        "value": "PA3990185",
+        "captured": null,
+        "transcript": "Okay, your authorization number is P as in Papa, A as in Alpha, 3990185.",
+        "exact": false
+      },
+      {
+        "value": "HH4154",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is H as in hotel, H as in hotel, 4154.",
+        "exact": false
+      },
+      {
+        "value": "Q919-80",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is Q as in Quebec, 919-80.",
+        "exact": false
+      },
+      {
+        "value": "PA4671432",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is P as in Papa, A as in Alpha, 4671432.",
+        "exact": false
+      },
+      {
+        "value": "CJ7762",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is C as in Charlie, J as in Juliet, 7762.",
+        "exact": false
+      },
+      {
+        "value": "L196-06",
+        "captured": null,
+        "transcript": "Okay, your authorization number is L as in Lima 196-06.",
+        "exact": false
+      },
+      {
+        "value": "PA8791010",
+        "captured": null,
+        "transcript": "Okay, your authorization number is P as in Papa, A as in Alpha, 8791010.",
+        "exact": false
+      },
+      {
+        "value": "LM0522",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is L as in Lima, M as in Mike, 0522.",
+        "exact": false
+      },
+      {
+        "value": "H741-62",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is H as in hotel, 741-62.",
+        "exact": false
+      },
+      {
+        "value": "PA6910269",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is P as in Papa, A as in Alpha, 6910269.",
+        "exact": false
+      },
+      {
+        "value": "LE9799",
+        "captured": null,
+        "transcript": "Okay, your authorization number is L as in Lima, E as in Echo, 9799.",
+        "exact": false
+      },
+      {
+        "value": "Q268-21",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is Q as in Quebec, 268-21.",
+        "exact": false
+      },
+      {
+        "value": "PA9874150",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is P as in Papa, A as in Alpha, 9874150.",
+        "exact": false
+      },
+      {
+        "value": "XF6601",
+        "captured": null,
+        "transcript": "Okay, your authorization number is X as in X-ray. F as in Foxtrot, 6601.",
+        "exact": false
+      },
+      {
+        "value": "M514-62",
+        "captured": null,
+        "transcript": "Okay, your authorization number is M as in Mike, 514-62.",
+        "exact": false
+      },
+      {
+        "value": "PA1946721",
+        "captured": null,
+        "transcript": "Okay. Your authorization number is P as in Papa, A as in Alpha, 19 for 6721.",
+        "exact": false
+      }
+    ]
+  }
+}

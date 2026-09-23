@@ -223,6 +223,17 @@ describe('connect and reconfigure', () => {
     assert.throws(() => initialPayload({ ...INITIAL, voice: 'Michael' }, false), /lowercase/);
   });
 
+  test('transcription_prompt is sent when given and omitted when not (ADR-006, ADR-020)', async () => {
+    const { fake, session } = await setup();
+    await session.update({ transcriptionPrompt: 'A representative is reading an authorization number.' });
+    assert.deepEqual(fake.sent(0, 'session.update').at(-1)!['session'], {
+      input: { transcription_prompt: 'A representative is reading an authorization number.' },
+    });
+    const off = JSON.stringify(initialPayload(INITIAL, false));
+    assert.doesNotMatch(off, /transcription_prompt/, 'a config without one must not send an empty field');
+    await session.end();
+  });
+
   test('update sends only the mutable fields and resolves on session.updated', async () => {
     const { fake, session } = await setup();
     await session.update({ systemPrompt: 'New prompt.', transcriptionMode: 'max_accuracy' });

@@ -482,6 +482,22 @@ Both are **inserted digits**, not substituted ones, and in both cases the tool f
 
 **This is what `READBACK` is for.** An ASR insertion is precisely the failure the read-back phase exists to catch: the agent reads the stored value aloud, the representative hears a number that is not theirs, and `confirm_readback(matched: false, corrected_value)` replaces it (§8.2). A-24 measures capture in isolation; the workflow does not rely on capture alone.
 
+**A-24 at scale, 2026-09-24 — the assumption closes at 20/20, and one of the two levers below is refuted.**
+
+| Arm | Exact | Tool never called |
+|---|---|---|
+| Baseline (no lever) | **20/20 (100%)** | 0 |
+| `transcription_prompt` | 20/20 (100%) | 0 |
+| `pattern` on `value` | 1/20 (5%) | **19** |
+
+**The 93.3% was the rig, not the system.** Day 0's rendering put a comma between every digit; this run says the numbers the way a representative does, spelling each letter with a NATO word and grouping digits in pairs. With that, capture-by-tool is exact on every number, and the model→tool path remains error-free — now 60 out of 60 across three arms.
+
+Reaching that took two discarded runs, and both failures were in the rig rather than the system: the first invented an `AUTH-12345-X` shape and spelled the literal prefix ("Hotel, L" was captured as `AUTHL`, one spoken "dash" came back as "dash, Dash" and became `--`); the second said the same prefix as a word and the recognizer heard "off". A score measured through a rig that says what nobody says measures the rig. **Neither run's numbers are reported as A-24 results.**
+
+**`pattern` is refused as a lever — it suppresses the capture entirely.** With `pattern: '^[A-Z0-9-]{3,20}$'` on `capture_auth_number.value`, the model heard the number correctly (the transcripts show it) and then did not call the tool at all in 19 of 20 cases. Entity-aware waiting may well read the pattern, but the cost here is not a worse value; it is no value. **§8.1 must keep `capture_auth_number.value` free of a `pattern`**, and this paragraph replaces the suggestion below.
+
+**`transcription_prompt` is retained but unproven.** It changed nothing at 100%, which is the only honest reading: a lever cannot be shown to help where there is nothing left to fix. It stays available per position (ADR-006) for the harder audio §6.6 will bring — genuine human turns, where the baseline will not be 100%.
+
 **Two levers, and `keyterms` is not one of them.** An authorization number is not known before the call — discovering it is the point — so it cannot be seeded into `keyterms` the way a CPT code or a payer name can (§7.2). What remains:
 
 | Lever | Why it applies |
@@ -733,6 +749,10 @@ type NetworkProfile = {
 Presets: `CLEAN` (0 ms, for unit tests), `TELEPHONY` (the defaults above, used for every measurement and the demo), `DEGRADED` (60 ms, 25 ms jitter, 1% loss, for robustness).
 
 **All measurements are taken under `TELEPHONY`.** A figure produced under `CLEAN` is not comparable to anything and must not be reported.
+
+**Raising the resolution is not enough on Windows 11 — it is taken back (found 2026-09-24).** `timeBeginPeriod(1)` works, and then stops working when the process is no longer in the foreground: the operating system throttles timer resolution for background processes. Measured inside one test process: an early `setTimeout(25)` took 25.34 ms and a later `setTimeout(20)` took **30.55 ms** — the 15.625 ms quantum, back without a word. The far end's 20 ms drain then ran at 31 ms, its playout queue overflowed by 44 frames, and repeated DTMF digits merged; the symptom looked like a decoder fault and was an operating-system setting.
+
+Each process that depends on the profile therefore also calls `SetProcessInformation(ProcessPowerThrottling)` with `PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION` in the control mask and a zero state mask, which asks for the exemption. After it: 20.26–20.42 ms, and the queue stops overflowing. The startup line now reports both halves ("raised … ; timer throttling disabled for this process"), and a test measures the resolution **late in a run** rather than at startup, because at startup it is always still true.
 
 **Honesty boundary.** These values model documented telephony behavior. They are not a measurement of any specific network, and §1.7 says so.
 
@@ -2599,7 +2619,7 @@ pnpm --filter dashboard dev
 - [ ] `packages/fixtures/data/` excluded from the public repository (enforced by a test)
 - [ ] `check-invariants.ts` and `check-doc-claims.ts` green in CI
 - [ ] For a live demo: E3 re-measured on the host being demoed from (ADR-003)
-- [ ] **On Windows:** both processes log `timer resolution: raised from 15.625 ms to 1 ms` at startup. Without it the network profile is not applied and no latency figure from that run may be reported (§4.5)
+- [ ] **On Windows:** both processes log `timer resolution: raised from 15.625 ms to 1 ms via timeBeginPeriod; timer throttling disabled for this process` at startup. Both halves matter: without the raise the profile is not applied, and without the throttling exemption it is taken back as soon as the window loses focus (§4.5). No latency figure from a run missing either half may be reported
 
 ---
 
@@ -2958,7 +2978,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 |---|---|---|
 | 3.1 | Tool handlers | Allowlist authorization precedes execution; rejections return reasons; §8.8 ordering respected including side-effect persistence on interrupt. **Done 2026-09-23 in `apps/core`: authorization is checked before arguments are read (a test gives a forbidden tool invalid arguments and requires the POSITION as the reason); the §8.1 schemas live in code and a test compares them field by field with this document; effects are written during `handle`, so an interrupted reply loses the result message and never the write** |
 | 3.2 | Phase producers | `capture_auth_number` and `confirm_readback` drive every phase transition; `readbackAttempts` has one writer; phase timeouts route to escalation. **Done 2026-09-24: every §5.4 row has a test, one writer proven by trying every other tool and both timers, and a `CLOSING` or `DONE` tick reports no escalation** |
-| 3.3 | Validation §8.5 | All five status rules; §8.5.1 rejects bare boilerplate; idempotency on `requestId`; **A-24 confirmed at scale** |
+| 3.3 | Validation §8.5 | All five status rules; §8.5.1 rejects bare boilerplate; idempotency on `requestId`; **A-24 confirmed at scale**. **Done 2026-09-24: the Work Queue keys idempotency on `requestId` with INV-18's two writers and INV-19's safety net; A-24 closed at 20/20 (`results/a24-capture.json`)** |
 | 3.4 | Closing and escalation | All five §8.6 paths produce a summary with `[URGENCY]`; outcome before closing on every path; `DONE` produced only by `reply.done`; **A-23 passes** |
 | 3.5 | Read-back path | **A-15 passes**; **A-13 measured** |
 | 3.6 | Work Queue and panel 8 | Refuses redial on a final status; **A-16 passes**; escalation cards render; "mark handled" writes `escalated_resolved` |
@@ -3004,7 +3024,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-21** | A hold during the closing preserves the phase | **Major** | 10 holds during closing. Returns to `CLOSING` with `closingKind` intact; **zero** landing in a bare `EXCHANGE` |
 | **A-22** | Reaching a re-prompt limit produces a defined action rather than silence | **Medium** | Harness goes silent without closing, at every position. Every call ends where §5.7 specifies |
 | **A-23** | An immediate close after the closing phrase does not produce a `failed` record | **High** | 10 escalation calls with the link closed under 1 s after the closing phrase. `escalated` in 10 of 10, zero redials. Repeat for the mismatch re-entry path |
-| **A-24** | Capture-by-tool makes the number comparison reliable without normalization | **Fatal — the approval path** | **Run 2026-09-21: 28/30 exact (93.3%) — SHORT of the 95% bar by one number. Zero comparison failures.** Both clauses matter and they landed differently. The second passed absolutely: no failure anywhere was caused by comparison, and the model's tool argument matched the ASR transcript in **30 of 30** cases. The first missed narrowly, and both misses were *recognition* errors upstream of the model — see ADR-020 |
+| **A-24** | Capture-by-tool makes the number comparison reliable without normalization | **Fatal — the approval path** | **CLOSED 2026-09-24: 20/20 exact (100%) with a rig that says numbers the way a representative does, and 20/20 again with `transcription_prompt`. The `pattern` lever ADR-020 suggested is refuted: 1/20, with the tool never called in 19. Model-to-tool fidelity is now 60/60 across three arms.** Earlier, run 2026-09-21: 28/30 (93.3%), short of the bar by one number; both misses were rig artifacts. **Zero comparison failures in any run.** Both clauses matter and they landed differently. The second passed absolutely: no failure anywhere was caused by comparison, and the model's tool argument matched the ASR transcript in **30 of 30** cases. The first missed narrowly, and both misses were *recognition* errors upstream of the model — see ADR-020 |
 | **A-25** | `createReply` produces a core-initiated turn and respects the gate | **Fatal — all of §5.7** | **CLOSED 2026-09-21.** `reply.create` confirmed (ADR-022). 239 ms median, 244 ms p90 — the 1500 ms budget was never approached. Gate closed: 3413 ms discarded, **0 bytes** downstream |
 | **A-26** | *(reserved — carrier stream direction, not applicable)* | — | Not run. Recorded so a carrier build knows it is open |
 | **A-27** | `HOLD_CUE` phrases spoken without a hold do not mute the agent excessively | **Major** | 20 utterances of "let me check" with the persona continuing. `gate_false_close_count` recorded; `agent_mute_during_conversation_ms` p90 < 1500 ms |

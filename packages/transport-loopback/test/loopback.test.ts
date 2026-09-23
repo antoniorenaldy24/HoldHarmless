@@ -6,22 +6,36 @@
  *    per discarded chunk"
  */
 
-import { test, describe, after } from 'node:test';
+import { test, describe, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { BYTES_PER_FRAME, FRAME_MS, MULAW_SILENCE, chunkToFrames, dtmf, createGoertzelDetector } from '@holdharmless/audio';
-import { PROFILES, raiseTimerResolution, measureTimerAccuracy } from '@holdharmless/transport';
+import { PROFILES, raiseTimerResolution, measureTimerAccuracy, timerThrottlingDisabled } from '@holdharmless/transport';
 import { LoopbackEndpoint, LoopbackTransport, createPlayoutQueue, type FarEndSession } from '../src/index.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const frameOf = (fill: number) => new Uint8Array(BYTES_PER_FRAME).fill(fill);
 
-async function pair(profile = PROFILES.TELEPHONY, autoDrain = true) {
+/**
+ * One link, closed when the test that made it ends.
+ *
+ * The close has to be per test, not deferred to after(). Every live pair keeps
+ * a 20 ms drain interval and two delay lines running, and with eight of them
+ * still alive the ninth test's far end fell behind: its playout queue
+ * overflowed by 43 frames and the repeated digits in the A-1 regression merged.
+ * One run per process was always clean, which is what pointed at the leak
+ * rather than at the decoder.
+ */
+async function pair(t: TestContext, profile = PROFILES.TELEPHONY, autoDrain = true) {
   const endpoint = await LoopbackEndpoint.listen({ port: 0, profile, autoDrain });
   const sessionReady = new Promise<FarEndSession>((resolve) => endpoint.onSession(resolve));
   const transport = new LoopbackTransport();
   await transport.dial(endpoint.url(), profile);
   const session = await sessionReady;
+  t.after(async () => {
+    await transport.hangup().catch(() => undefined);
+    await endpoint.close();
+  });
   return { endpoint, transport, session };
 }
 
@@ -30,10 +44,7 @@ async function pair(profile = PROFILES.TELEPHONY, autoDrain = true) {
 // makes every delay assertion below a measurement of the host, not the link.
 const timerResolution = raiseTimerResolution();
 
-const cleanups: (() => Promise<void>)[] = [];
-after(async () => {
-  for (const c of cleanups) await c();
-});
+
 
 describe('playout queue (ADR-008)', () => {
   test('drains one frame per tick and reports marks when reached', () => {
@@ -72,7 +83,22 @@ describe('playout queue (ADR-008)', () => {
 });
 
 describe('host timer resolution', () => {
-  test('the host can schedule a 25 ms delay to within 3 ms', async () => {
+  test('the raised resolution SURVIVES the whole run — Windows throttles background processes', async () => {
+    // Measured late, on purpose. Early in a process the resolution holds; once
+    // the window loses focus Windows 11 throttles it back to 15.625 ms unless
+    // the process opted out (SetProcessInformation / ProcessPowerThrottling).
+    // Before that opt-out, this measurement read 30.55 ms here, the far end's
+    // 20 ms drain ran at 31 ms, and the A-1 regression below failed with merged
+    // digits — a decoder blamed for an operating-system setting.
+    const late = await measureTimerAccuracy(20, 10);
+    console.log(`      setTimeout(20) late in the run: ${late.meanMs.toFixed(2)} ms`);
+    if (process.platform === 'win32') {
+      assert.equal(timerThrottlingDisabled(), true, 'this process is still subject to timer throttling');
+    }
+    assert.ok(Math.abs(late.errorMs) <= 5, `setTimeout(20) took ${late.meanMs.toFixed(2)} ms late in the run`);
+  });
+
+  test('the host can schedule a 25 ms delay to within 3 ms', async (t) => {
     // A precondition for every delay figure in this file. If this fails, the
     // delay test below is measuring the operating system's scheduler.
     console.log(`      timer resolution: ${timerResolution.detail}`);
@@ -83,9 +109,8 @@ describe('host timer resolution', () => {
 });
 
 describe('loopback link (acceptance 1.3)', () => {
-  test('two endpoints exchange mu-law at 8 kHz in both directions under TELEPHONY', async () => {
-    const { endpoint, transport, session } = await pair();
-    cleanups.push(() => endpoint.close());
+  test('two endpoints exchange mu-law at 8 kHz in both directions under TELEPHONY', async (t) => {
+    const { endpoint, transport, session } = await pair(t);
     transport.applyGate('open');
 
     const atFar: Uint8Array[] = [];
@@ -107,9 +132,8 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('measured one-way delay matches TELEPHONY within 5 ms', async () => {
-    const { endpoint, transport, session } = await pair(PROFILES.TELEPHONY, false);
-    cleanups.push(() => endpoint.close());
+  test('measured one-way delay matches TELEPHONY within 5 ms', async (t) => {
+    const { endpoint, transport, session } = await pair(t, PROFILES.TELEPHONY, false);
     transport.applyGate('open');
 
     const arrivals: number[] = [];
@@ -139,9 +163,8 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('applyGate(closed) makes sendAudio return false, for agent AND dtmf', async () => {
-    const { endpoint, transport } = await pair(PROFILES.CLEAN);
-    cleanups.push(() => endpoint.close());
+  test('applyGate(closed) makes sendAudio return false, for agent AND dtmf', async (t) => {
+    const { endpoint, transport } = await pair(t, PROFILES.CLEAN);
 
     transport.applyGate('open');
     assert.equal(transport.sendAudio(frameOf(1), 'agent'), true);
@@ -162,9 +185,8 @@ describe('loopback link (acceptance 1.3)', () => {
     assert.equal(new LoopbackTransport().gate(), 'closed');
   });
 
-  test('clear() empties a loaded playout queue and returns one mark per discarded chunk', async () => {
-    const { endpoint, transport, session } = await pair(PROFILES.TELEPHONY, false);
-    cleanups.push(() => endpoint.close());
+  test('clear() empties a loaded playout queue and returns one mark per discarded chunk', async (t) => {
+    const { endpoint, transport, session } = await pair(t, PROFILES.TELEPHONY, false);
     transport.applyGate('open');
 
     const chunks = ['reply-1', 'reply-2', 'reply-3', 'reply-4'];
@@ -181,9 +203,8 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('closing the gate clears the far-end queue on its own (ADR-007 layer 2)', async () => {
-    const { endpoint, transport, session } = await pair(PROFILES.TELEPHONY, false);
-    cleanups.push(() => endpoint.close());
+  test('closing the gate clears the far-end queue on its own (ADR-007 layer 2)', async (t) => {
+    const { endpoint, transport, session } = await pair(t, PROFILES.TELEPHONY, false);
     transport.applyGate('open');
 
     for (let i = 0; i < 8; i++) transport.sendAudio(frameOf(0x20), 'agent');
@@ -196,9 +217,8 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('marks come back as they are played', async () => {
-    const { endpoint, transport } = await pair(PROFILES.TELEPHONY, true);
-    cleanups.push(() => endpoint.close());
+  test('marks come back as they are played', async (t) => {
+    const { endpoint, transport } = await pair(t, PROFILES.TELEPHONY, true);
     transport.applyGate('open');
 
     const played: string[] = [];
@@ -210,9 +230,8 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('DTMF survives the link and decodes at the far end (E1 precursor)', async () => {
-    const { endpoint, transport, session } = await pair(PROFILES.TELEPHONY, true);
-    cleanups.push(() => endpoint.close());
+  test('DTMF survives the link and decodes at the far end (E1 precursor)', async (t) => {
+    const { endpoint, transport, session } = await pair(t, PROFILES.TELEPHONY, true);
     transport.applyGate('dtmf_only');
 
     const detector = createGoertzelDetector();
@@ -232,11 +251,10 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('A-1 regression: 20 digits at 100/50 ms decode 20/20 across TELEPHONY, off the frame grid', async () => {
+  test('A-1 regression: 20 digits at 100/50 ms decode 20/20 across TELEPHONY, off the frame grid', async (t) => {
     // The E1 criterion, kept in CI at one offset (scripts/e1-dtmf-reach.ts runs
     // the full sweep). Includes four immediate repeats, the case a short gap breaks.
-    const { endpoint, transport, session } = await pair(PROFILES.TELEPHONY, true);
-    cleanups.push(() => endpoint.close());
+    const { endpoint, transport, session } = await pair(t, PROFILES.TELEPHONY, true);
     transport.applyGate('dtmf_only');
     const detector = createGoertzelDetector();
     let decoded = '';
@@ -256,13 +274,17 @@ describe('loopback link (acceptance 1.3)', () => {
       await sleep(Math.max(0, due - performance.now()));
     }
     await sleep(300);
+    // The far end must have HEARD every frame. An overflowing queue drops audio
+    // and merges repeated digits, and then this test is measuring the host's
+    // ability to drain in real time rather than the decoder (see the timer
+    // throttling note in packages/transport/src/timer-resolution.ts).
+    assert.equal(session.playout.overflowCount(), 0, 'the far end could not drain the queue in real time');
     assert.equal(decoded, digits);
     await transport.hangup();
   });
 
-  test('the speaker emits comfort silence on every empty tick; a short hole counts as underflow, a pause does not', async () => {
-    const { endpoint, transport, session } = await pair(PROFILES.CLEAN, true);
-    cleanups.push(() => endpoint.close());
+  test('the speaker emits comfort silence on every empty tick; a short hole counts as underflow, a pause does not', async (t) => {
+    const { endpoint, transport, session } = await pair(t, PROFILES.CLEAN, true);
     transport.applyGate('open');
     const speaker: number[] = [];
     session.onSpeaker((f) => speaker.push(f[0]!));
@@ -286,22 +308,20 @@ describe('loopback link (acceptance 1.3)', () => {
     await transport.hangup();
   });
 
-  test('a far-end hangup reports far_end_hangup, a dropped socket reports link_drop', async () => {
-    const a = await pair(PROFILES.CLEAN);
-    cleanups.push(() => a.endpoint.close());
+  test('a far-end hangup reports far_end_hangup, a dropped socket reports link_drop', async (t) => {
+    const a = await pair(t, PROFILES.CLEAN);
     const causeA = new Promise<string>((r) => a.transport.onClosed(r));
     a.session.hangup();
     assert.equal(await causeA, 'far_end_hangup');
 
-    const b = await pair(PROFILES.CLEAN);
+    const b = await pair(t, PROFILES.CLEAN);
     const causeB = new Promise<string>((r) => b.transport.onClosed(r));
     await b.endpoint.close(); // terminate without a hangup message
     assert.equal(await causeB, 'link_drop');
   });
 
-  test('a malformed inbound frame is reported as a fault, never thrown', async () => {
-    const { endpoint, transport, session } = await pair(PROFILES.CLEAN);
-    cleanups.push(() => endpoint.close());
+  test('a malformed inbound frame is reported as a fault, never thrown', async (t) => {
+    const { endpoint, transport, session } = await pair(t, PROFILES.CLEAN);
     const faults: string[] = [];
     transport.onFault((k) => faults.push(k));
     session.sendAudio(new Uint8Array(37));

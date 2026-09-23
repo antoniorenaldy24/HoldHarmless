@@ -38,6 +38,19 @@ export type TimerResolution = {
 
 let active: { release: () => void } | null = null;
 
+/**
+ * Module-level references to the loaded library and its two functions.
+ *
+ * WITHOUT THESE THE RAISED RESOLUTION IS LOST TO GARBAGE COLLECTION, silently.
+ * koffi's library handle was a local; once it became unreachable the DLL could
+ * be unloaded, and unloading winmm ends the period that timeBeginPeriod began.
+ * Measured on 2026-09-24 inside one test process: setTimeout(25) took 25.34 ms
+ * early on and setTimeout(20) took 30.55 ms later — the 15.625 ms quantum, back
+ * without a word. Everything downstream (the 20 ms pacing, every latency figure,
+ * the profile itself) had quietly stopped being true.
+ */
+let held: { winmm: unknown; begin: (p: number) => number; end: (p: number) => number } | null = null;
+
 export function raiseTimerResolution(): TimerResolution {
   if (process.platform !== 'win32') {
     return { raised: false, platform: process.platform, detail: 'not required on this platform' };
@@ -57,14 +70,18 @@ export function raiseTimerResolution(): TimerResolution {
       return { raised: false, platform: 'win32', detail: 'timeBeginPeriod(1) returned an error' };
     }
 
+    held = { winmm, begin, end };
+    const throttling = disableTimerThrottling(koffi);
+
     const release = () => {
       if (active === null) return;
       active = null;
+      held = null;
       end(1);
     };
     active = { release };
     process.once('exit', release);
-    return { raised: true, platform: 'win32', detail: 'raised from 15.625 ms to 1 ms via timeBeginPeriod' };
+    return { raised: true, platform: 'win32', detail: `raised from 15.625 ms to 1 ms via timeBeginPeriod; ${throttling}` };
   } catch (err) {
     // Never fatal: the system still runs, it just cannot honor the profile.
     // The caller is expected to record this, so a figure measured without it
@@ -76,6 +93,52 @@ export function raiseTimerResolution(): TimerResolution {
     };
   }
 }
+
+/**
+ * Opts this process out of Windows 11's timer-resolution throttling.
+ *
+ * WITHOUT THIS, timeBeginPeriod(1) STOPS WORKING WHEN THE PROCESS IS NOT IN
+ * THE FOREGROUND. Measured on 2026-09-24: inside one test process, an early
+ * setTimeout(25) took 25.34 ms and a later setTimeout(20) took 30.55 ms — the
+ * 15.625 ms quantum, back without a word, after the window lost focus. The
+ * far end's 20 ms drain then ran at 31 ms, its playout queue overflowed by 44
+ * frames, and repeated DTMF digits merged. The symptom looked like a decoder
+ * fault; the cause was the operating system throttling a background process.
+ *
+ * SetProcessInformation(ProcessPowerThrottling) with
+ * PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION in the control mask and a
+ * zero state mask is the documented way to ask for the exemption.
+ */
+function disableTimerThrottling(koffi: typeof import('koffi')): string {
+  const PROCESS_POWER_THROTTLING = 4;
+  const CURRENT_VERSION = 1;
+  const IGNORE_TIMER_RESOLUTION = 0x4;
+  try {
+    const kernel32 = koffi.load('kernel32.dll');
+    const getCurrentProcess = kernel32.func('void* __stdcall GetCurrentProcess()') as () => unknown;
+    const setProcessInformation = kernel32.func(
+      'int __stdcall SetProcessInformation(void* hProcess, int ProcessInformationClass, void* ProcessInformation, uint32 ProcessInformationSize)',
+    ) as (h: unknown, cls: number, info: Buffer, size: number) => number;
+
+    // PROCESS_POWER_THROTTLING_STATE: three 32-bit fields.
+    const state = Buffer.alloc(12);
+    state.writeUInt32LE(CURRENT_VERSION, 0);
+    state.writeUInt32LE(IGNORE_TIMER_RESOLUTION, 4); // ControlMask: this is ours to set
+    state.writeUInt32LE(0, 8); // StateMask 0: do NOT throttle it
+    const ok = setProcessInformation(getCurrentProcess(), PROCESS_POWER_THROTTLING, state, state.length);
+    thrott = ok !== 0;
+    return ok !== 0 ? 'timer throttling disabled for this process' : 'timer throttling could NOT be disabled';
+  } catch (err) {
+    return `timer throttling could NOT be disabled: ${(err as Error).message}`;
+  }
+}
+
+/** True when this process is exempt from Windows timer-resolution throttling. */
+export function timerThrottlingDisabled(): boolean {
+  return thrott;
+}
+
+let thrott = false;
 
 export function releaseTimerResolution(): void {
   active?.release();

@@ -49,6 +49,13 @@ export interface SessionConfig {
   tools: ToolDefinition[];
   transcriptionMode: TranscriptionMode;
   keyterms: string[];
+  /**
+   * Biases the recognizer toward a domain. Mutable per position (ADR-006), and
+   * ADR-020 names it as the first of the two levers left for A-24: an
+   * authorization number cannot be seeded into keyterms, because discovering it
+   * is the point of the call.
+   */
+  transcriptionPrompt?: string;
   interruptResponse: boolean;
   /** Sent only when ENABLE_INTERRUPTION_DELAY (ADR-011). */
   interruptionDelayMs?: number;
@@ -157,6 +164,7 @@ function mutablePayload(c: Partial<SessionConfig>, enableDelay: boolean): Record
   const input: Record<string, unknown> = {};
   if (c.transcriptionMode !== undefined) input['transcription_mode'] = c.transcriptionMode;
   if (c.keyterms !== undefined) input['keyterms'] = c.keyterms;
+  if (c.transcriptionPrompt !== undefined) input['transcription_prompt'] = c.transcriptionPrompt;
   const turn: Record<string, unknown> = {};
   if (c.interruptResponse !== undefined) turn['interrupt_response'] = c.interruptResponse;
   // Never min_silence / max_silence (ADR-009).
