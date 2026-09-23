@@ -837,6 +837,10 @@ Two follow-ups fire in the **same handler** as the channel change, so the interm
 
 **`readbackAttempts` has exactly one writer**: `confirm_readback` with `matched: false`.
 
+**As built in v1.3 (module 3.2), `createPhaseMachine` in `packages/callmodel`.** It is the only code that moves the phase, which is what makes `INV-13` a property of the structure rather than a rule to remember.
+
+**How `CLOSING → DONE` works when its two conditions arrive out of order.** The row needs a completed closing turn *and* `outcomeWritten`, and either can be last. The completed turn is latched, so an outcome written afterwards still ends the call, and the producer recorded is the `reply.done` that spoke the closing — never a timer. This is also how §5.7's `CLOSING` after-limit reaches `DONE` without contradicting this table or §21 3.4: the limit's action writes the outcome deterministically, and the latch does the rest. An **interrupted** closing does not latch: the far end cut in, and the call is not finished.
+
 **Phase timeouts are the backstop for tool-driven transitions.** If the model never calls `capture_auth_number`, the call does not sit in `EXCHANGE` forever: `PHASE_TIMEOUT_EXCHANGE_MS` (default 480 s of accumulated `HUMAN` channel time) routes it to escalation with a deterministic summary. Accumulated human time, not wall clock, so a long hold does not consume the budget.
 
 ### 5.5 Ordering guarantee and gate derivation
@@ -2953,7 +2957,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | # | Module | Acceptance criteria |
 |---|---|---|
 | 3.1 | Tool handlers | Allowlist authorization precedes execution; rejections return reasons; §8.8 ordering respected including side-effect persistence on interrupt. **Done 2026-09-23 in `apps/core`: authorization is checked before arguments are read (a test gives a forbidden tool invalid arguments and requires the POSITION as the reason); the §8.1 schemas live in code and a test compares them field by field with this document; effects are written during `handle`, so an interrupted reply loses the result message and never the write** |
-| 3.2 | Phase producers | `capture_auth_number` and `confirm_readback` drive every phase transition; `readbackAttempts` has one writer; phase timeouts route to escalation |
+| 3.2 | Phase producers | `capture_auth_number` and `confirm_readback` drive every phase transition; `readbackAttempts` has one writer; phase timeouts route to escalation. **Done 2026-09-24: every §5.4 row has a test, one writer proven by trying every other tool and both timers, and a `CLOSING` or `DONE` tick reports no escalation** |
 | 3.3 | Validation §8.5 | All five status rules; §8.5.1 rejects bare boilerplate; idempotency on `requestId`; **A-24 confirmed at scale** |
 | 3.4 | Closing and escalation | All five §8.6 paths produce a summary with `[URGENCY]`; outcome before closing on every path; `DONE` produced only by `reply.done`; **A-23 passes** |
 | 3.5 | Read-back path | **A-15 passes**; **A-13 measured** |

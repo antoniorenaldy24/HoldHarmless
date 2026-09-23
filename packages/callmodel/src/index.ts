@@ -4,3 +4,4 @@ export * from './transitions.js';
 export * from './policy.js';
 export * from './suspicion.js';
 export * from './disclosure.js';
+export * from './phase.js';
