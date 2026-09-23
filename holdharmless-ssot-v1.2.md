@@ -1544,6 +1544,8 @@ Eight tools. Each has a named producer row in §5.3 or §5.4, or an explicitly n
 
 **No tool carries `request_id`.** One call is active at a time; the handler substitutes the active identifier and logs any mismatch.
 
+**The schemas exist twice, on purpose (v1.3, module 3.1).** The model needs them at `session.update` time and the handler needs them to validate arguments, and neither can parse this document at runtime. `apps/core/src/tool-schemas.ts` holds them, and a test parses the JSON above and compares every property, requirement, enum, pattern and length against it — so a schema changed here and not there fails the suite instead of drifting. An argument the schema does not mention is ignored rather than refused: models add fields, and refusing a call over a harmless extra costs a turn.
+
 **`record_outcome` does not carry `context_summary`.** On the escalation path the summary was written and validated when `escalate_to_human` was called, or produced deterministically by §8.6. It lives in the event log keyed by `callId`, and the Escalation Tasks panel reads it from there. Requiring a field the tool does not carry would be a rule with no mechanism.
 
 ### 8.2 Authorization number integrity, without normalization
@@ -1638,6 +1640,8 @@ member not eligible
 These may appear **inside** a longer reason; what is rejected is a reason consisting of nothing else. Rejection returns a `tool.result` asking for the specific criterion, document, or therapy cited.
 
 Only the three token types are checked. Drug and therapy names would require a lexicon this project does not maintain.
+
+**Condition 2 is currently subsumed by condition 3 — found in module 3.1, and kept anyway.** Not one blocklist entry contains a number, a code or a time unit, so every one of them already fails condition 3; removing the blocklist changes no outcome today, which is why a mutation that deletes it survives the suite. It stays because it is the condition that would catch the entry that *did* carry a token: "denied per policy 2024 revision" passes condition 3 on its own. A test asserts both halves of that sentence, so the redundancy is a recorded fact rather than an assumption.
 
 **Idempotency is keyed on `requestId` alone.** `callId` differs per call, so a compound key would only prevent double writes within one call. The case that needs protection is redial: if the link drops after the number is given but before `record_outcome` is written, the second call would resubmit. The question is "does this request already have a result," not "did this call record one."
 
@@ -2948,7 +2952,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 
 | # | Module | Acceptance criteria |
 |---|---|---|
-| 3.1 | Tool handlers | Allowlist authorization precedes execution; rejections return reasons; §8.8 ordering respected including side-effect persistence on interrupt |
+| 3.1 | Tool handlers | Allowlist authorization precedes execution; rejections return reasons; §8.8 ordering respected including side-effect persistence on interrupt. **Done 2026-09-23 in `apps/core`: authorization is checked before arguments are read (a test gives a forbidden tool invalid arguments and requires the POSITION as the reason); the §8.1 schemas live in code and a test compares them field by field with this document; effects are written during `handle`, so an interrupted reply loses the result message and never the write** |
 | 3.2 | Phase producers | `capture_auth_number` and `confirm_readback` drive every phase transition; `readbackAttempts` has one writer; phase timeouts route to escalation |
 | 3.3 | Validation §8.5 | All five status rules; §8.5.1 rejects bare boilerplate; idempotency on `requestId`; **A-24 confirmed at scale** |
 | 3.4 | Closing and escalation | All five §8.6 paths produce a summary with `[URGENCY]`; outcome before closing on every path; `DONE` produced only by `reply.done`; **A-23 passes** |

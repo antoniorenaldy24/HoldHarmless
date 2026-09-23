@@ -172,6 +172,9 @@ importers:
       '@holdharmless/audio':
         specifier: workspace:*
         version: link:packages/audio
+      '@holdharmless/core':
+        specifier: workspace:*
+        version: link:apps/core
       '@holdharmless/events':
         specifier: workspace:*
         version: link:packages/events
@@ -202,6 +205,30 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.21.3
+
+  apps/core:
+    dependencies:
+      '@holdharmless/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@holdharmless/callmodel':
+        specifier: workspace:*
+        version: link:../../packages/callmodel
+      '@holdharmless/classifier':
+        specifier: workspace:*
+        version: link:../../packages/classifier
+      '@holdharmless/events':
+        specifier: workspace:*
+        version: link:../../packages/events
+      '@holdharmless/prompts':
+        specifier: workspace:*
+        version: link:../../packages/prompts
+      '@holdharmless/transport':
+        specifier: workspace:*
+        version: link:../../packages/transport
+      '@holdharmless/transport-loopback':
+        specifier: workspace:*
+        version: link:../../packages/transport-loopback
 
   apps/dashboard:
     dependencies:

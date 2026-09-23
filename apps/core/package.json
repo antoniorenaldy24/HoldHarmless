@@ -1,0 +1,17 @@
+{
+  "name": "@holdharmless/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Orchestrator, call model host, tool handlers, work queue (SSOT §12.9).",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@holdharmless/agent": "workspace:*",
+    "@holdharmless/callmodel": "workspace:*",
+    "@holdharmless/classifier": "workspace:*",
+    "@holdharmless/events": "workspace:*",
+    "@holdharmless/prompts": "workspace:*",
+    "@holdharmless/transport": "workspace:*",
+    "@holdharmless/transport-loopback": "workspace:*"
+  }
+}
