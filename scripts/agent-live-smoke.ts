@@ -86,7 +86,9 @@ try {
   check(events.some((e) => e.t === 'reply.requested' && e.cause === 'silence_recovery'), 'reply.requested logged with its cause');
 
   console.log('4. ADR-022 refusals (nothing is sent)');
-  for (const [state, reason] of [[{ gateIntent: 'closed', holdSuspected: false }, 'gate_not_open'], [{ gateIntent: 'dtmf_only', holdSuspected: false }, 'gate_not_open'], [{ gateIntent: 'open', holdSuspected: true }, 'hold_suspected']] as const) {
+  // A speech reply needs an open gate; 'dtmf_only' forbids speech but not a
+  // dtmf reply (ADR-022's first condition, refined 2026-09-23).
+  for (const [state, reason] of [[{ gateIntent: 'closed', holdSuspected: false }, 'gate_forbids_product'], [{ gateIntent: 'dtmf_only', holdSuspected: false }, 'gate_forbids_product'], [{ gateIntent: 'open', holdSuspected: true }, 'hold_suspected']] as const) {
     Object.assign(guard, state);
     const e = await session.createReply('silence_recovery').catch((x: unknown) => x);
     check(e instanceof ReplyRefused && e.reason === reason, `${state.gateIntent}/${state.holdSuspected ? 'suspected' : 'clear'} -> ${e instanceof ReplyRefused ? e.reason : 'SENT'}`);

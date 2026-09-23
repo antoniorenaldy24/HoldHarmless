@@ -519,7 +519,7 @@ Both are cheap to test and belong in week 1 alongside the `patient_dob` follow-u
 
 **Three conditions, all mandatory.**
 
-1. **Forbidden while `gateIntent ≠ 'open'`.** Otherwise a recovery action generates audio the gate discards — still billed, and testing `INV-2` rather than respecting it.
+1. **Forbidden unless the gate admits what the reply is permitted to produce** (refined 2026-09-23; it read "forbidden while `gateIntent ≠ 'open'`"). Otherwise a recovery action generates audio the gate discards — still billed, and testing `INV-2` rather than respecting it. A reply declares its product: `speech` needs an `open` gate; `dtmf` — a reply whose only permitted effect is a `send_dtmf` call — passes a `dtmf_only` gate as well, which is what keeps IVR navigation recovery (§5.7) possible without reopening the gate for speech.
 2. **Forbidden while `holdSuspected` is true.** This makes `INV-4` true by construction rather than merely checked.
 3. **Logged as its own event** (`reply.requested`, with cause). Otherwise `perceived_response_ms` mixes reactive replies with timer-driven ones and stops meaning anything.
 
@@ -921,27 +921,16 @@ Recovery actions require `createReply` (ADR-022) and are forbidden while the gat
 | `HUMAN` / `EXCHANGE`, disclosed | 3000 ms | Offer the next item | 2× | `CLOSED`, `cause: 'unresponsive'` |
 | `HUMAN` / `READBACK` | 3000 ms | Repeat the read-back | 2× | **`CLOSING`** (escalation) via §8.6 |
 | `HUMAN` / `CLOSING` | 2000 ms | Continue the closing sequence | 2× | **`DONE`** — the Call Model writes the outcome deterministically if unwritten |
-| `TRANSFER` | 4000 ms | Ask whether still connected | 1× | `CLOSED`, `cause: 'unresponsive'` |
+| `TRANSFER` | — | **Nothing.** The gate is always closed here, so a spoken question is billed and inaudible | — | Only `TRANSFER_TIMEOUT_MS`, which ends the call as `CLOSED`, `cause: 'timeout'` |
 | `HOLD` | 8000 ms | Raise semantic sensitivity by one step | **3 steps, then stop** | Nothing further. Only `HOLD_TIMEOUT_MS` ends the hold, and the agent never speaks during it (§6.7, ADR-007) |
 
-> **Open questions, found while removing the hold probe (v1.3) and not yet decided.** Two rows above share part of the probe's problem. ADR-022 forbids `createReply` unless the gate is `open`, and `INV-4` enforces it with no exceptions:
+> **Both questions decided by the project owner on 2026-09-23.** They were found while removing the hold probe (v1.3): two rows shared part of the probe's problem, because ADR-022 forbade `createReply` unless the gate was `open`.
 >
-> - **`TRANSFER`** — "ask whether still connected" is spoken where `gateFor()` is always `closed`, so, like the probe, it is billed and inaudible; it also contradicts `TRANSFER.txt`, which tells the agent to wait quietly. The consistent resolution is the one taken for `HOLD`: no spoken action, with `TRANSFER_TIMEOUT_MS` as the exit.
-> - **`IVR` in `dtmf` mode** — "repeat navigation" needs a `createReply` while the gate is `dtmf_only`. Unlike the probe, this reply is useful: its effect is a `send_dtmf` call, not speech, and DTMF passes a `dtmf_only` gate. The consistent resolution is to refine ADR-022's first condition to "the gate admits what the reply is permitted to produce", rather than "the gate is open".
+> - **`TRANSFER` — the spoken action is removed.** "Ask whether still connected" was spoken where `gateFor()` is always `closed`, so like the probe it was billed and inaudible, and it contradicted `TRANSFER.txt`, which tells the agent to wait quietly. The resolution is the one already taken for `HOLD`: no spoken action at all, with `TRANSFER_TIMEOUT_MS` (90 s) as the only exit. The agent is now silent for the whole of every transfer as well as every hold.
+> - **`IVR` in `dtmf` mode — kept, and ADR-022's first condition is refined.** "Repeat navigation" needs a `createReply` while the gate is `dtmf_only`, but unlike the probe this reply is *useful*: its effect is a `send_dtmf` call, not speech, and DTMF passes a `dtmf_only` gate. ADR-022's first condition now reads **"the gate admits what the reply is permitted to produce"** rather than "the gate is open", and `createReply` carries what it may produce so the condition can be checked rather than assumed.
 >
-> §18's "`createReply` permitted" row still reads "yes" for both positions. Neither is exercised until the Call Model implements silence recovery (weeks 2–3), and each changes a decision record, so both are left for the project owner.
+> The cost of the first decision is that a transfer which silently fails now ends at `TRANSFER_TIMEOUT_MS` instead of after one question — 90 seconds of an unrecoverable call rather than 4. That is the price of never being billed for audio nobody hears, and it is the same trade the hold probe's removal made.
 
-**Counters do not advance while `holdSuspected` is true.** This is the single most consequential line in this section. A hold that begins without a spoken cue is confirmed only by the 20-second autocorrelation window. If counters advanced through that window, `EXCHANGE` would reach its limit at about 9 seconds and end the call as unresponsive — every unannounced hold would be fatal, and the harness can produce one by configuration. The counter freezes on suspicion and resumes only when the gate reopens.
-
-**The `HOLD` sensitivity ramp has a floor and a step limit** (§6.7). Without them it would run roughly 150 times across a 20-minute hold and erase the threshold it was tuned to.
-
-**`cause: 'unresponsive'` is distinct** from `far_end_hangup` and `link_drop` because it is application-detected. The real case it models: a representative sets the handset down without hanging up. The harness reproduces it by configuration.
-
----
-
-## 6. Channel classifier
-
-The classifier answers one question — who is on the line — in two layers with different latencies and different evidentiary powers. It never touches the phase dimension.
 
 ### 6.1 Acoustic layer
 
@@ -2787,8 +2776,8 @@ A single symbol for both "checked and irrelevant" and "not yet examined" is what
 | **Phase can change here** | only `NOT_STARTED→EXCHANGE` | **no** (INV-13) | **no** (INV-13) | yes | yes | yes |
 | **`PARTY_HEDGE` can be prepended** | — | — | — | **yes** | **yes** | **yes** |
 | **`DISCLOSURE.txt` can be emitted** | — | — | — | **yes** | **yes** | **yes** |
-| **Silence action** | repeat nav | raise sensitivity, max 3 | ask ×1 | opening or offer ×2 | repeat ×2 | continue ×2 |
-| **After-limit target** | `CLOSED` unresponsive | nothing further; hold timeout only | `CLOSED` unresponsive | `CLOSED` unresponsive | `CLOSING` escalation | `DONE` |
+| **Silence action** | repeat nav (dtmf only) | raise sensitivity, max 3 | **—** (decided 2026-09-23) | opening or offer ×2 | repeat ×2 | continue ×2 |
+| **After-limit target** | `CLOSED` unresponsive | nothing further; hold timeout only | nothing further; `TRANSFER_TIMEOUT_MS` only | `CLOSED` unresponsive | `CLOSING` escalation | `DONE` |
 | **Counters freeze on `holdSuspected`** | yes | — | yes | yes | yes | yes |
 | **Phase timeout** | — | — | — | 480 s human time | 180 s | 120 s |
 | **`interrupt_response`** | `false` | `false` | `false` | `true` | `true` | `true` |
@@ -2796,7 +2785,7 @@ A single symbol for both "checked and irrelevant" and "not yet examined" is what
 | **`transcription_mode`** | `min_latency` | `balanced` | `balanced` | `max_accuracy` | `max_accuracy` | `balanced` |
 | **Tools permitted** | 1 | — | — | 5 | 4 | 4 |
 | **Writes an outcome** | — | — | — | — | — | **yes** |
-| **`createReply` permitted** | yes | **no** — the gate is always closed (§6.7) | yes | yes | yes | yes |
+| **`createReply` permitted** | yes, producing `dtmf` only (ADR-022, refined) | **no** — the gate is always closed (§6.7) | **no** — the gate is always closed (decided 2026-09-23) | yes | yes | yes |
 | **Playout queue active** | yes | yes, cleared on entry | yes | yes | yes | yes |
 | **Has a §5.6 row** | yes | yes | yes | yes | yes | yes |
 | **Has a §5.7 row** | yes | yes | yes | yes | yes | yes |

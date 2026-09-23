@@ -25,10 +25,11 @@ export type AfterLimit =
   | { kind: 'phase'; to: 'DONE' }
   /**
    * No further action: the channel's own timeout is the only exit. Used by HOLD
-   * after its three ramp steps. It replaced 'hold_probe_once' in v1.3, when the
-   * one spoken probe during hold was removed (§6.7): it fired where the gate is
-   * always closed, and making it audible would have tied the gate to something
-   * other than who is listening (ADR-007).
+   * after its three ramp steps, and by TRANSFER, which has no recovery action at
+   * all. It replaced 'hold_probe_once' in v1.3, when the one spoken probe during
+   * hold was removed (§6.7): it fired where the gate is always closed, and making
+   * it audible would have tied the gate to something other than who is listening
+   * (ADR-007). TRANSFER's spoken question went the same way on 2026-09-23.
    */
   | { kind: 'await_timeout' };
 
@@ -131,14 +132,21 @@ const awaitingClosePolicy: PositionPolicy = {
   tools: [],
 };
 
+/**
+ * TRANSFER has no spoken recovery action — decided by the project owner on
+ * 2026-09-23, the same resolution HOLD received in v1.3 (§5.7).
+ *
+ * "Ask whether still connected" was spoken where gateFor() is always closed:
+ * billed, inaudible, and in direct contradiction with TRANSFER.txt, which tells
+ * the agent to wait quietly. The cost of removing it is real and was accepted:
+ * a transfer that silently fails now ends at TRANSFER_TIMEOUT_MS (90 s) rather
+ * than after one question at 4 s.
+ */
 const transferPolicy: PositionPolicy = {
   interruptResponse: false,
   transcriptionMode: 'balanced',
-  silenceTimeoutMs: 4000,
-  rePromptLimit: 1,
-  afterLimit: { kind: 'close', cause: 'unresponsive' },
+  afterLimit: { kind: 'await_timeout' },
   tools: [],
-  silenceAction: 'ask whether still connected',
 };
 
 export const POSITION_POLICY: Readonly<Partial<Record<PositionId, PositionPolicy>>> = {

@@ -8,8 +8,9 @@
  *
  * THREE RULES THIS CLASS ENFORCES RATHER THAN DOCUMENTS
  *
- *  1. createReply refuses unless the gate is open, hold is not suspected, and no
- *     reply is outstanding (ADR-022). The Call Model is supposed to check first;
+ *  1. createReply refuses unless the gate ADMITS WHAT THE REPLY MAY PRODUCE,
+ *     hold is not suspected, and no reply is outstanding (ADR-022, first
+ *     condition refined 2026-09-23). The Call Model is supposed to check first;
  *     checking again here makes INV-2 and INV-4 true by construction at the one
  *     place a reply can be requested, instead of at every caller.
  *  2. tool.result is sent only after reply.done, one per call_id, and discarded
@@ -68,7 +69,21 @@ export type ReplyGuardState = { gateIntent: GateIntent; holdSuspected: boolean }
 
 export type ConnectionState = 'lost' | 'restored' | 'context_lost' | 'failed';
 
-export type ReplyRefusal = 'gate_not_open' | 'hold_suspected' | 'reply_outstanding' | 'not_connected';
+export type ReplyRefusal = 'gate_forbids_product' | 'hold_suspected' | 'reply_outstanding' | 'not_connected';
+
+/**
+ * What a requested reply is permitted to produce — ADR-022's first condition,
+ * refined by the project owner on 2026-09-23.
+ *
+ *   'speech' needs an open gate.
+ *   'dtmf'   is a reply whose only permitted effect is a send_dtmf call, so it
+ *            passes a dtmf_only gate as well. This is what keeps §5.7's IVR
+ *            navigation recovery possible without reopening the gate for speech.
+ *
+ * The condition used to read "the gate is open", which forbade the useful case
+ * along with the useless one.
+ */
+export type ReplyProduct = 'speech' | 'dtmf';
 
 export class ReplyRefused extends Error {
   constructor(readonly reason: ReplyRefusal) {
@@ -122,6 +137,12 @@ export type AgentSessionOptions = {
 };
 
 const OPEN = 1;
+
+/** The gate rule of ADR-022 condition 1, as one testable function. */
+export function gateAdmitsProduct(gate: GateIntent, produces: ReplyProduct): boolean {
+  if (gate === 'open') return true;
+  return gate === 'dtmf_only' && produces === 'dtmf';
+}
 
 // ---------------------------------------------------------------------------
 // Payloads — §7.1
@@ -248,10 +269,12 @@ export class AgentSession {
   }
 
   /** ADR-022. Refuses — never queues — when any condition fails. */
-  async createReply(cause: ReplyCause, oneShotInstructions?: string): Promise<void> {
+  async createReply(cause: ReplyCause, oneShotInstructions?: string, produces: ReplyProduct = 'speech'): Promise<void> {
     const g = this.opts.guard();
     if (!this.ws || this.ws.readyState !== OPEN || this.recovering) throw new ReplyRefused('not_connected');
-    if (g.gateIntent !== 'open') throw new ReplyRefused('gate_not_open');
+    // ADR-022 condition 1, as refined: the gate must admit what this reply may
+    // produce. 'speech' needs 'open'; 'dtmf' also passes 'dtmf_only'.
+    if (!gateAdmitsProduct(g.gateIntent, produces)) throw new ReplyRefused('gate_forbids_product');
     if (g.holdSuspected) throw new ReplyRefused('hold_suspected');
     // The server QUEUES a reply.create sent during a reply (E-REPLY): a second
     // call buys a second utterance, not a faster one.

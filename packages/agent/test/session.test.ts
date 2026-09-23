@@ -19,6 +19,7 @@ import {
   AgentSession,
   ReplyRefused,
   SessionError,
+  gateAdmitsProduct,
   initialPayload,
   type AgentEvent,
   type ConnectionState,
@@ -251,14 +252,40 @@ describe('createReply under the three ADR-022 conditions', () => {
   });
 
   for (const gate of ['closed', 'dtmf_only'] as const) {
-    test(`refused while the gate is ${gate}, and nothing is sent or logged`, async () => {
+    test(`a speech reply is refused while the gate is ${gate}, and nothing is sent or logged`, async () => {
       const { fake, session, events } = await setup({ gateIntent: gate, holdSuspected: false });
-      await assert.rejects(session.createReply('silence_recovery'), (e) => e instanceof ReplyRefused && e.reason === 'gate_not_open');
+      await assert.rejects(session.createReply('silence_recovery'), (e) => e instanceof ReplyRefused && e.reason === 'gate_forbids_product');
       assert.equal(fake.sent(0, 'reply.create').length, 0);
       assert.equal(events.length, 0);
       await session.end();
     });
   }
+
+  test('a dtmf reply passes a dtmf_only gate — §5.7 IVR navigation recovery (ADR-022, refined 2026-09-23)', async () => {
+    const { fake, session, events } = await setup({ gateIntent: 'dtmf_only', holdSuspected: false });
+    await session.createReply('silence_recovery', 'Press the option for prior authorization.', 'dtmf');
+    await waitFor('reply.create at the server', () => fake.sent(0, 'reply.create').length === 1);
+    assert.equal(events[0]!.t, 'reply.requested');
+    await session.end();
+  });
+
+  test('a dtmf reply is still refused while the gate is closed, and while hold is suspected', async () => {
+    const closed = await setup({ gateIntent: 'closed', holdSuspected: false });
+    await assert.rejects(closed.session.createReply('silence_recovery', undefined, 'dtmf'), (e) => e instanceof ReplyRefused && e.reason === 'gate_forbids_product');
+    await closed.session.end();
+    const held = await setup({ gateIntent: 'dtmf_only', holdSuspected: true });
+    await assert.rejects(held.session.createReply('silence_recovery', undefined, 'dtmf'), (e) => e instanceof ReplyRefused && e.reason === 'hold_suspected');
+    await held.session.end();
+  });
+
+  test('the gate rule itself, as a table', () => {
+    const cases: [Parameters<typeof gateAdmitsProduct>[0], Parameters<typeof gateAdmitsProduct>[1], boolean][] = [
+      ['open', 'speech', true], ['open', 'dtmf', true],
+      ['dtmf_only', 'speech', false], ['dtmf_only', 'dtmf', true],
+      ['closed', 'speech', false], ['closed', 'dtmf', false],
+    ];
+    for (const [gate, produces, expected] of cases) assert.equal(gateAdmitsProduct(gate, produces), expected, `${gate}/${produces}`);
+  });
 
   test('refused while hold is suspected, even with the gate open (INV-4 by construction)', async () => {
     const { fake, session } = await setup({ gateIntent: 'open', holdSuspected: true });
