@@ -1,0 +1,192 @@
+{
+  "experiment": "A-15",
+  "transcriptionPrompt": false,
+  "digitKeyterms": true,
+  "ranAt": "2026-09-24T14:57:57.197Z",
+  "interruptAfterMs": 1800,
+  "passed": 0,
+  "separatorOnly": 16,
+  "wrongRecorded": 4,
+  "results": [
+    {
+      "believed": "Q946-85",
+      "actual": "Q940-85",
+      "matched": false,
+      "corrected": "Q94085",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's Q as in Quebec, 940-85."
+    },
+    {
+      "believed": "V019-82",
+      "actual": "V089-82",
+      "matched": false,
+      "corrected": "V08982",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's V as in Victor, 089-82."
+    },
+    {
+      "believed": "G329-47",
+      "actual": "G529-47",
+      "matched": false,
+      "corrected": "G5297",
+      "pass": false,
+      "separatorOnly": false,
+      "heard": "No. Sorry, that's not it. It's G as in golf. 5, 2, 9, dash, or 7."
+    },
+    {
+      "believed": "L837-50",
+      "actual": "L437-50",
+      "matched": false,
+      "corrected": "L3750",
+      "pass": false,
+      "separatorOnly": false,
+      "heard": "No. Sorry, that's not it. It's L as in Lima, or 37-50."
+    },
+    {
+      "believed": "V708-40",
+      "actual": "V768-40",
+      "matched": false,
+      "corrected": "V76840",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's V as in Victor, 768-40."
+    },
+    {
+      "believed": "V111-35",
+      "actual": "V311-35",
+      "matched": false,
+      "corrected": "V31135",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's V as in Victor, 311-35."
+    },
+    {
+      "believed": "E426-72",
+      "actual": "E476-72",
+      "matched": false,
+      "corrected": "E7672",
+      "pass": false,
+      "separatorOnly": false,
+      "heard": "No. Sorry, that's not it. It's E as in Echo for 76-72."
+    },
+    {
+      "believed": "T092-63",
+      "actual": "T097-63",
+      "matched": false,
+      "corrected": "T09763",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's T as in Tango, 097-63."
+    },
+    {
+      "believed": "C294-40",
+      "actual": "C254-40",
+      "matched": false,
+      "corrected": "C25440",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's C as in Charlie, 254-40."
+    },
+    {
+      "believed": "E768-71",
+      "actual": "E068-71",
+      "matched": false,
+      "corrected": "E06871",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's E as in Echo, 068-71."
+    },
+    {
+      "believed": "K401-07",
+      "actual": "K451-07",
+      "matched": false,
+      "corrected": "K5107",
+      "pass": false,
+      "separatorOnly": false,
+      "heard": "No. Sorry, that's not it. It's K as in kilo for 5, 1, dash, 07."
+    },
+    {
+      "believed": "Q097-54",
+      "actual": "Q098-54",
+      "matched": false,
+      "corrected": "Q09854",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's Q as in Quebec, 098-54."
+    },
+    {
+      "believed": "C225-78",
+      "actual": "C229-78",
+      "matched": false,
+      "corrected": "C22978",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's C as in Charlie, 229-78."
+    },
+    {
+      "believed": "N217-17",
+      "actual": "N277-17",
+      "matched": false,
+      "corrected": "N27717",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's in as in November, 277-17."
+    },
+    {
+      "believed": "R111-69",
+      "actual": "R711-69",
+      "matched": false,
+      "corrected": "R71169",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's our as in Romeo, 711-69."
+    },
+    {
+      "believed": "Q031-46",
+      "actual": "Q037-46",
+      "matched": false,
+      "corrected": "Q03746",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's Q as in Quebec, 037-46."
+    },
+    {
+      "believed": "Q311-60",
+      "actual": "Q313-60",
+      "matched": false,
+      "corrected": "Q31360",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's Q as in Quebec, 313-60."
+    },
+    {
+      "believed": "A584-12",
+      "actual": "A580-12",
+      "matched": false,
+      "corrected": "A58012",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's A as in alpha, 5, 8, 0, dash, 1, 2."
+    },
+    {
+      "believed": "B564-52",
+      "actual": "B569-52",
+      "matched": false,
+      "corrected": "B56952",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's B as in Bravo, 569-52."
+    },
+    {
+      "believed": "P001-84",
+      "actual": "P009-84",
+      "matched": false,
+      "corrected": "P00984",
+      "pass": false,
+      "separatorOnly": true,
+      "heard": "No. Sorry, that's not it. It's P as in Papa, 009-84."
+    }
+  ]
+}

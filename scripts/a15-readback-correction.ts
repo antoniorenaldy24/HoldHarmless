@@ -53,6 +53,12 @@ const INTERRUPT_AFTER_MS = Number(arg('interrupt') ?? 1800);
  * reproducible, and both are reported.
  */
 const WITH_PROMPT = process.argv.includes('--prompt');
+/**
+ * ADR-020's second lever, and the one that fits this failure better than the
+ * first. The prompt describes the situation; keyterms bias the recognizer
+ * toward specific words, and the specific word being lost is "four".
+ */
+const WITH_KEYTERMS = process.argv.includes('--keyterms');
 const TRANSCRIPTION_PROMPT =
   'A health plan representative is correcting an alphanumeric prior authorization number, spoken letter by letter and digit by digit. ' +
   'Transcribe every spoken digit as a digit — "four" is 4, never the word "for" — and do not group digits into larger numbers.';
@@ -168,7 +174,9 @@ try {
     systemPrompt: SYSTEM_PROMPT,
     tools: [CONFIRM_READBACK],
     transcriptionMode: 'max_accuracy',
-    keyterms: ['authorization number', 'as in', 'dash'],
+    keyterms: WITH_KEYTERMS
+      ? ['authorization number', 'as in', 'dash', ...DIGIT_WORDS]
+      : ['authorization number', 'as in', 'dash'],
     ...(WITH_PROMPT ? { transcriptionPrompt: TRANSCRIPTION_PROMPT } : {}),
     // READBACK's whole point: a correction arrives as an interruption (§7.5).
     interruptResponse: true,
@@ -240,7 +248,7 @@ try {
   console.log(`\nA-15: confirm_readback(matched:false) carrying the corrected value exactly in ${passed}/${results.length}; correct but with the separator dropped in ${sep}; wrong numbers accepted: ${wrongRecorded}`);
   fs.mkdirSync(path.join(ROOT, 'results'), { recursive: true });
   fs.writeFileSync(
-    path.join(ROOT, WITH_PROMPT ? 'results/a15-readback-prompt.json' : 'results/a15-readback.json'),
-    JSON.stringify({ experiment: 'A-15', transcriptionPrompt: WITH_PROMPT, ranAt: new Date().toISOString(), interruptAfterMs: INTERRUPT_AFTER_MS, passed, separatorOnly: sep, wrongRecorded, results }, null, 2) + '\n',
+    path.join(ROOT, WITH_KEYTERMS ? 'results/a15-readback-keyterms.json' : WITH_PROMPT ? 'results/a15-readback-prompt.json' : 'results/a15-readback.json'),
+    JSON.stringify({ experiment: 'A-15', transcriptionPrompt: WITH_PROMPT, digitKeyterms: WITH_KEYTERMS, ranAt: new Date().toISOString(), interruptAfterMs: INTERRUPT_AFTER_MS, passed, separatorOnly: sep, wrongRecorded, results }, null, 2) + '\n',
   );
 }
