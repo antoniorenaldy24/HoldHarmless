@@ -95,7 +95,7 @@ export const TOOL_SCHEMAS: readonly ToolSchema[] = [
       type: 'object',
       properties: {
         matched: { type: 'boolean', description: 'True only on an explicit confirmation. Silence is not confirmation.' },
-        corrected_value: { type: 'string', description: 'Required when matched is false and the representative gave a different number.' },
+        corrected_value: { type: 'string', description: 'Required when matched is false and the representative gave a different number. Write it exactly as they gave it, including any dash or space: the value is compared character by character and is never tidied up.' },
       },
       required: ['matched'],
     },
