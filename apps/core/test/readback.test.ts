@@ -8,9 +8,16 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import type { CallEventBody } from '@holdharmless/events';
+import type { AuthRequest, Call, CallEventBody, Outcome, ToolName } from '@holdharmless/events';
 import { createPhaseMachine } from '@holdharmless/callmodel';
-import { captureAppearsInSpeech, createReadbackIntegrity, spokenToCharacters } from '../src/index.js';
+import {
+  captureAppearsInSpeech,
+  createReadbackIntegrity,
+  createToolHandlers,
+  spokenToCharacters,
+  type ToolEffects,
+  type ToolEvent,
+} from '../src/index.js';
 
 const setup = () => {
   const events: CallEventBody[] = [];
@@ -138,5 +145,96 @@ describe('the correction path (§8.2, §5.4)', () => {
     m.onToolAccepted('confirm_readback', { matched: true });
     assert.equal(integrity.checkOutcome('tc-1', 'A472-91', m.state.capturedAuthNumber), false, 'the number before the correction must not pass');
     assert.equal(integrity.checkOutcome('tc-2', 'A473-91', m.state.capturedAuthNumber), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The wiring. Written because the first version of this module passed all of
+// its own tests while nothing in the call path called it: the checks existed,
+// and no tool handler ever asked them anything.
+// ---------------------------------------------------------------------------
+
+const REQUEST: AuthRequest = {
+  id: 'SYN-REQ-1', patientRef: 'SYN-PT-1', memberId: 'SYN-M-44821', patientDob: '1970-03-14',
+  cptCode: '96413', icdCode: 'C50.911', providerNpi: '1234567890', serviceDate: '2026-10-01',
+  payerId: 'SYN-PAYER-1', payerEndpoint: 'ws://127.0.0.1:8081/call', clinicName: 'Riverside Synthetic Clinic',
+  clinicCallbackPhone: '555-0142', priority: 'routine', clinicalSummary: 'Synthetic clinical summary.',
+  status: 'in_progress', attempts: 0,
+};
+
+const CALL: Call = {
+  id: 'SYN-CALL-1', requestId: REQUEST.id, transport: 'loopback', navMode: 'dtmf', networkProfile: 'TELEPHONY',
+  startedAt: '2026-09-24T00:00:00.000Z', channel: 'HUMAN', phase: 'EXCHANGE', holdSuspected: false,
+  holdDurationMs: 0, cumulativeHoldMs: 0, humanChannelMs: 0, disclosedToCurrentParty: true,
+  partiesDetected: 1, disclosuresDelivered: 1, readbackAttempts: 0, rePromptCounts: {}, holdRampSteps: 0,
+  pendingContextCorrection: false, discardedToolResults: [], outcomeWritten: false, billableSessionMs: 0,
+};
+
+function wired(over: { captured?: string; farEnd?: string; phase?: Call['phase'] } = {}) {
+  const toolEvents: ToolEvent[] = [];
+  const callEvents: CallEventBody[] = [];
+  const outcomes: Outcome[] = [];
+  const captures: string[] = [];
+  const effects: ToolEffects = {
+    sendDtmf: () => {}, captureAuthNumber: (v) => captures.push(v), confirmReadback: () => {},
+    notifyTransfer: () => {}, captureReference: () => {}, escalate: () => {},
+    recordOutcome: (o) => outcomes.push(o),
+  };
+  const handlers = createToolHandlers({
+    state: () => ({
+      channel: 'HUMAN',
+      phase: over.phase ?? 'CLOSING',
+      call: { ...CALL, phase: over.phase ?? 'CLOSING', ...(over.captured ? { capturedAuthNumber: over.captured } : {}) },
+      request: REQUEST,
+    }),
+    effects,
+    emit: (e) => toolEvents.push(e),
+    readback: createReadbackIntegrity({ emit: (e) => callEvents.push(e) }),
+    farEndSpeech: () => over.farEnd ?? '',
+  });
+  const call = (name: ToolName, args: unknown) => handlers.handle('SYN-CALL-1', 'tc-77', name, args);
+  return { call, toolEvents, callEvents, outcomes, captures };
+}
+
+describe('the handler asks §8.2 its questions (module 3.5 wiring)', () => {
+  test('a recorded number that is not the captured one is rejected AND recorded as a violation', () => {
+    const w = wired({ captured: 'A472-91' });
+    const result = w.call('record_outcome', { status: 'approved', auth_number: 'A473-91' });
+    assert.equal(result.ok, false);
+    assert.deepEqual(w.outcomes, [], 'the outcome must not be written');
+    const rejection = w.toolEvents.find((e) => e.t === 'tool.rejected');
+    const violation = w.callEvents.find((e) => e.t === 'safety.violation');
+    assert.ok(rejection, 'the model must be refused');
+    assert.ok(violation, 'and the refusal must leave a safety record beside it (INV-15)');
+    assert.equal(rejection.toolCallId, violation.t === 'safety.violation' ? violation.toolCallId : '', 'one toolCallId pairs them');
+    assert.equal(w.toolEvents.filter((e) => e.t === 'tool.rejected').length, 1, 'exactly one rejection, by the one route every rejection uses');
+  });
+
+  test('the matching number is accepted, and nothing is recorded against it', () => {
+    const w = wired({ captured: 'A472-91' });
+    assert.equal(w.call('record_outcome', { status: 'approved', auth_number: 'A472-91' }).ok, true);
+    assert.deepEqual(w.callEvents, []);
+    assert.equal(w.outcomes.length, 1);
+  });
+
+  test('an ordinary validation failure is NOT a safety violation', () => {
+    // §8.2's whole point: only the mismatch is a violation. A denial with a
+    // boilerplate reason is refused by §8.5.1 and must leave no safety record.
+    const w = wired({ captured: 'A472-91' });
+    assert.equal(w.call('record_outcome', { status: 'denied', denial_reason: 'not medically necessary' }).ok, false);
+    assert.deepEqual(w.callEvents, [], 'a rejected denial reason is not a breach');
+  });
+
+  test('a capture the far end does not appear to have said is flagged — and still captured', () => {
+    const w = wired({ phase: 'EXCHANGE', farEnd: 'your authorization number is A as in alpha, four seven two, dash, nine one' });
+    assert.equal(w.call('capture_auth_number', { value: 'B999-00' }).ok, true, 'a review signal never throws the number away');
+    assert.deepEqual(w.captures, ['B999-00']);
+    assert.deepEqual(w.callEvents.map((e) => e.t), ['auth_number.suspect']);
+  });
+
+  test('a capture the far end did say passes in silence', () => {
+    const w = wired({ phase: 'EXCHANGE', farEnd: 'it is A as in alpha, four seven two, dash, nine one' });
+    assert.equal(w.call('capture_auth_number', { value: 'A472-91' }).ok, true);
+    assert.deepEqual(w.callEvents, []);
   });
 });

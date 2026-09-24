@@ -35,6 +35,7 @@ import type {
 import { toolsAllowedAt } from '@holdharmless/callmodel';
 import { schemaFor, type PropertySchema } from './tool-schemas.js';
 import { validateOutcomeArgs, type OutcomeValidation } from './outcome-validation.js';
+import type { ReadbackIntegrity } from './readback.js';
 
 export type ToolCallState = {
   channel: Channel;
@@ -64,6 +65,19 @@ export type ToolHandlerOptions = {
   effects: ToolEffects;
   emit?: (event: ToolEvent) => void;
   now?: () => number;
+  /**
+   * §8.2's two checks. Optional because a handler without them still refuses a
+   * mismatched number — what it loses is the SAFETY record beside the refusal
+   * and the review signal after a capture, which are the parts a compliance
+   * panel reads. Module 3.5.
+   */
+  readback?: ReadbackIntegrity;
+  /**
+   * What the far end has said this turn, for the sanity check after a capture.
+   * A review signal only: it never blocks a capture, and it cannot see a
+   * recognition error, which is why READBACK exists at all.
+   */
+  farEndSpeech?: () => string;
 };
 
 export type ToolOutcome =
@@ -164,7 +178,18 @@ export function createToolHandlers(options: ToolHandlerOptions): ToolHandlers {
 
       if (name === 'record_outcome') {
         const verdict: OutcomeValidation = validateOutcomeArgs(a, state);
-        if (!verdict.ok) return refuse(verdict.category, verdict.reason);
+        if (!verdict.ok) {
+          // §8.2 separates the two failures that must never be combined. An
+          // ordinary validation failure is a rejection the model can answer; a
+          // number that is not the one this call captured is also a SAFETY
+          // violation, recorded under the same toolCallId (INV-15) and never
+          // retried. The rejection still leaves by the one route every other
+          // rejection uses.
+          if (verdict.kind === 'auth_number_mismatch') {
+            options.readback?.recordOutcomeMismatch(toolCallId, String(a['auth_number'] ?? ''), state.call.capturedAuthNumber);
+          }
+          return refuse(verdict.category, verdict.reason);
+        }
       }
       if (name === 'confirm_readback' && a['matched'] === false && typeof a['corrected_value'] !== 'string') {
         return refuse('validation_failed', 'corrected_value is required when matched is false: give the number the representative said instead.');
@@ -189,6 +214,10 @@ export function createToolHandlers(options: ToolHandlerOptions): ToolHandlers {
           const value = String(a['value']);
           const spoken = typeof a['spoken_form'] === 'string' ? a['spoken_form'] : undefined;
           options.effects.captureAuthNumber(value, spoken);
+          // AFTER the write, and it cannot undo it: a capture the far end does
+          // not appear to have said is a recognition signal for a human to look
+          // at, not grounds to throw the number away (§8.2).
+          if (options.readback && options.farEndSpeech) options.readback.checkCapture(value, options.farEndSpeech());
           return done({ ok: true, captured: value });
         }
 

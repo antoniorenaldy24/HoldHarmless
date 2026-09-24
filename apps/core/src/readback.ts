@@ -80,6 +80,17 @@ export function captureAppearsInSpeech(value: string, farEndText: string): boole
   return strip(spoken).includes(strip(wanted));
 }
 
+/**
+ * §8.2's comparison, and the only copy of it. Byte for byte, with no
+ * normalization anywhere (ADR-020): both sides are copies of one stored value,
+ * so any difference is the model's. `outcome-validation.ts` decides the §8.5
+ * refusal and calls this rather than writing the comparison a second time — two
+ * copies of a rule this small is how one of them quietly starts trimming.
+ */
+export function authNumberMatches(recorded: string, captured: string | undefined): boolean {
+  return captured !== undefined && recorded === captured;
+}
+
 export type ReadbackDeps = {
   emit: (event: CallEventBody) => void;
 };
@@ -93,10 +104,30 @@ export interface ReadbackIntegrity {
    * no rejection beside it would describe a value that was nonetheless accepted.
    */
   checkOutcome(toolCallId: string, recorded: string, captured: string | undefined): boolean;
+  /**
+   * The violation ALONE, for the tool handler — which emits its own
+   * `tool.rejected` for every refusal and must not have this one arrive by a
+   * different route. INV-15's pairing holds because the caller passes the same
+   * `toolCallId` to both.
+   */
+  recordOutcomeMismatch(toolCallId: string, recorded: string, captured: string | undefined): void;
 }
 
 export function createReadbackIntegrity(deps: ReadbackDeps): ReadbackIntegrity {
+  // A local function rather than `this.recordOutcomeMismatch`: the returned
+  // object is meant to be destructured freely, and a `this` reference would
+  // turn that into a crash at the one moment a violation is being recorded.
+  const recordOutcomeMismatch = (toolCallId: string, recorded: string, captured: string | undefined): void => {
+    deps.emit({
+      t: 'safety.violation',
+      kind: 'auth_number_mismatch',
+      toolCallId,
+      detail: `recorded "${recorded}" against captured "${captured ?? 'nothing'}" — not retried (§8.2)`,
+    });
+  };
+
   return {
+    recordOutcomeMismatch,
     checkCapture(value: string, farEndText: string): boolean {
       const found = captureAppearsInSpeech(value, farEndText);
       if (!found) {
@@ -115,9 +146,7 @@ export function createReadbackIntegrity(deps: ReadbackDeps): ReadbackIntegrity {
     },
 
     checkOutcome(toolCallId: string, recorded: string, captured: string | undefined): boolean {
-      // Byte for byte, with no normalization anywhere (ADR-020): both sides are
-      // copies of one stored value, so any difference is the model's.
-      if (captured !== undefined && recorded === captured) return true;
+      if (authNumberMatches(recorded, captured)) return true;
       deps.emit({
         t: 'tool.rejected',
         toolCallId,
@@ -127,12 +156,7 @@ export function createReadbackIntegrity(deps: ReadbackDeps): ReadbackIntegrity {
           ? 'no authorization number was captured on this call'
           : `record_outcome carried "${recorded}" while the call captured "${captured}"`,
       });
-      deps.emit({
-        t: 'safety.violation',
-        kind: 'auth_number_mismatch',
-        toolCallId,
-        detail: `recorded "${recorded}" against captured "${captured ?? 'nothing'}" — not retried (§8.2)`,
-      });
+      recordOutcomeMismatch(toolCallId, recorded, captured);
       return false;
     },
   };

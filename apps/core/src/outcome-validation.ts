@@ -13,9 +13,18 @@
  */
 
 import type { ToolRejectionReason } from '@holdharmless/events';
+import { authNumberMatches } from './readback.js';
 import type { ToolCallState } from './tools.js';
 
-export type OutcomeValidation = { ok: true } | { ok: false; reason: string; category: ToolRejectionReason };
+export type OutcomeValidation =
+  | { ok: true }
+  /**
+   * `kind` names the ONE failure §8.2 treats differently from every other
+   * validation failure: a recorded number that is not the captured one is a
+   * safety violation as well as a rejection, and the caller needs to know which
+   * refusal it is holding without matching on the reason text.
+   */
+  | { ok: false; reason: string; category: ToolRejectionReason; kind?: 'auth_number_mismatch' };
 
 /**
  * §8.5.1's blocklist, verbatim. These may appear INSIDE a longer reason; what
@@ -86,10 +95,12 @@ export function validateOutcomeArgs(
     // §8.2: compared against the STORED capture, byte for byte, with no
     // normalization. A comparison that trimmed or upper-cased would be
     // comparing the model against itself.
-    if (given !== captured) {
+    // §8.2's comparison lives in readback.ts; this file decides the refusal.
+    if (!authNumberMatches(given, captured)) {
       return {
         ok: false,
         category: 'validation_failed',
+        kind: 'auth_number_mismatch',
         reason: `auth_number "${given}" does not match the number captured during this call. Record exactly the value confirmed during read-back.`,
       };
     }
