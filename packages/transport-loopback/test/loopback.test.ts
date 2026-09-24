@@ -279,6 +279,12 @@ describe('loopback link (acceptance 1.3)', () => {
     // ability to drain in real time rather than the decoder (see the timer
     // throttling note in packages/transport/src/timer-resolution.ts).
     assert.equal(session.playout.overflowCount(), 0, 'the far end could not drain the queue in real time');
+    // And the other direction. An underflow inserts comfort silence INTO the
+    // audio, which used to surface here as a mysterious extra digit rather than
+    // as what it is — a host that could not keep the stream fed. The decoder no
+    // longer splits a digit on one such hole, and this says so out loud when the
+    // machine is too slow to run this test honestly.
+    assert.equal(session.underflowCount(), 0, 'the sender was starved: this run measured the host, not the decoder');
     assert.equal(decoded, digits);
     await transport.hangup();
   });

@@ -12,7 +12,7 @@ import {
   muLaw, encodeSample, decodeSample, silenceFrame,
   BYTES_PER_FRAME, MULAW_SILENCE, SAMPLE_RATE,
   dtmf, tonesFor, DTMF_FREQUENCIES, chunkToFrames,
-  createGoertzelDetector, GOERTZEL_WINDOW_MS,
+  createGoertzelDetector, GOERTZEL_WINDOW_MS, MIN_INTERDIGIT_SILENCE_MS,
   createJitterBuffer,
   createSignalWindows, WINDOW_MS,
 } from '../src/index.js';
@@ -333,5 +333,57 @@ describe('signal windows (§4.3)', () => {
     assert.ok(w.availability().length > 0);
     w.reset();
     assert.deepEqual(w.availability(), []);
+  });
+});
+
+describe('a hole in the audio is not a second keypress', () => {
+  const DIGITS = '0123456789*#55443300';
+  const decode = (frames: Uint8Array[]): string => {
+    const detector = createGoertzelDetector();
+    let out = '';
+    for (const f of frames) out += detector.push(f) ?? '';
+    return out;
+  };
+  /** The A-1 stream, with the same 7 ms sub-frame offset the CI test uses. */
+  const stream = (offsetBytes: number, toneMs = 100, gapMs = 50): Uint8Array[] => {
+    const offset = new Uint8Array(offsetBytes).fill(MULAW_SILENCE);
+    const tones = dtmf.generate(DIGITS, toneMs, gapMs);
+    const bytes = new Uint8Array(offset.length + tones.length * BYTES_PER_FRAME);
+    bytes.set(offset);
+    tones.forEach((f, k) => bytes.set(f, offset.length + k * BYTES_PER_FRAME));
+    return chunkToFrames(bytes);
+  };
+
+  test('one frame of comfort silence inside a tone does not duplicate the digit', () => {
+    // How this was found: CI on a loaded Linux runner decoded
+    // "00123456789*#55443300". The far end emits comfort silence on an empty
+    // tick (§4.4), one such frame landed inside the first tone, and 20 ms of
+    // quiet was read as the pause between two presses of "0".
+    const frames = stream(56);
+    for (let at = 1; at <= 14; at++) {
+      const spliced = [...frames.slice(0, at), silenceFrame(), ...frames.slice(at)];
+      assert.equal(decode(spliced), DIGITS, `a hole after frame ${at} split a digit in two`);
+    }
+  });
+
+  test('a real pause between two presses of the same digit still gives two digits', () => {
+    // The other side of the same constant. Counting unclassifiable windows
+    // cannot tell these two cases apart — at a 40 ms window they look
+    // identical — so the pause is measured in samples, and this is the value
+    // that must keep working.
+    assert.equal(MIN_INTERDIGIT_SILENCE_MS, 40);
+    for (const gapMs of [40, 50, 60, 80]) {
+      assert.equal(decode(dtmf.generate('11', 100, gapMs)), '11', `a ${gapMs} ms gap merged two presses`);
+    }
+  });
+
+  test('the A-1 cells still decode 20/20, including the lowest the sweep recorded', () => {
+    // §20 A-1: "Lowest passing: 50/40 ms." A change to the repeat guard is a
+    // change to that number unless this says otherwise.
+    for (const [toneMs, gapMs] of [[100, 50], [50, 40]] as [number, number][]) {
+      for (const offsetBytes of [0, 24, 56, 80, 120]) {
+        assert.equal(decode(stream(offsetBytes, toneMs, gapMs)), DIGITS, `${toneMs}/${gapMs} ms at offset ${offsetBytes}`);
+      }
+    }
   });
 });

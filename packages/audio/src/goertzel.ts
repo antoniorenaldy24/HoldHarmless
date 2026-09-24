@@ -18,6 +18,30 @@ import { LOW_TONES, HIGH_TONES, DTMF_KEYPAD } from './dtmf.js';
 export const GOERTZEL_WINDOW_MS = 40;
 export const WINDOW_SAMPLES = (SAMPLE_RATE * GOERTZEL_WINDOW_MS) / 1000;
 export const CONSECUTIVE_REQUIRED = 2;
+
+/**
+ * How much CONTIGUOUS silence separates two presses of the same digit.
+ *
+ * Counting windows that failed to classify cannot do this job, and CI proved it
+ * twice over. The window is 40 ms, so a 20 ms hole inside a tone and a 50 ms
+ * pause between two presses both produce exactly two unclassifiable windows:
+ * raising the count to three then LOST the repeated digits in
+ * "0123456789*#55443300" rather than saving them. What separates the two cases
+ * is how long the line was actually quiet — 20 ms against 50 ms — so that is
+ * what is measured, in samples, independently of the window geometry.
+ *
+ * 40 ms is also the pause a real DTMF receiver requires before it will believe
+ * a key was pressed twice.
+ */
+export const MIN_INTERDIGIT_SILENCE_MS = 40;
+export const MIN_INTERDIGIT_SILENCE_SAMPLES = (SAMPLE_RATE * MIN_INTERDIGIT_SILENCE_MS) / 1000;
+
+/**
+ * Below this amplitude a sample counts as silence. μ-law silence decodes to
+ * roughly zero, and a DTMF tone at the levels this system generates runs in the
+ * thousands, so the line between them is wide.
+ */
+export const SILENCE_AMPLITUDE = 300;
 /** Half a window. See the note in push() for why the windows overlap. */
 export const WINDOW_HOP_SAMPLES = WINDOW_SAMPLES / 2;
 
@@ -61,6 +85,10 @@ export function createGoertzelDetector(): GoertzelDetector {
   let consecutive = 0;
   /** Prevents one long tone from decoding as a run of repeated digits. */
   let lastEmitted: string | null = null;
+  /** Consecutive near-silent samples, running across frame boundaries. */
+  let silentRun = 0;
+  /** True once the line has been quiet long enough for a repeat to be genuine. */
+  let pauseSeen = false;
 
   function classify(window: Int16Array): string | null {
     const lowEnergies = LOW_TONES.map((f) => goertzelEnergy(window, f));
@@ -105,7 +133,16 @@ export function createGoertzelDetector(): GoertzelDetector {
   return {
     push(frame: Uint8Array): string | null {
       const pcm = muLaw.decode(frame);
-      for (let i = 0; i < pcm.length; i++) buffer.push(pcm[i]!);
+      for (let i = 0; i < pcm.length; i++) {
+        const sample = pcm[i]!;
+        buffer.push(sample);
+        if (sample > -SILENCE_AMPLITUDE && sample < SILENCE_AMPLITUDE) {
+          silentRun++;
+          if (silentRun >= MIN_INTERDIGIT_SILENCE_SAMPLES) pauseSeen = true;
+        } else {
+          silentRun = 0;
+        }
+      }
 
       let emitted: string | null = null;
 
@@ -121,11 +158,13 @@ export function createGoertzelDetector(): GoertzelDetector {
         const digit = classify(window);
 
         if (digit === null) {
-          // A gap resets the run AND clears the guard, so the next press of the
-          // same digit is a new digit rather than a suppressed repeat.
+          // Silence breaks the RUN — a digit needs CONSECUTIVE_REQUIRED unbroken
+          // windows — but it does not on its own clear the repeat guard. What
+          // clears that is a measured pause, counted above in samples, because a
+          // hole in the audio and a pause between presses look identical to a
+          // 40 ms window and are nothing alike on the line.
           candidate = null;
           consecutive = 0;
-          lastEmitted = null;
           continue;
         }
 
@@ -136,8 +175,9 @@ export function createGoertzelDetector(): GoertzelDetector {
           consecutive = 1;
         }
 
-        if (consecutive >= CONSECUTIVE_REQUIRED && digit !== lastEmitted) {
+        if (consecutive >= CONSECUTIVE_REQUIRED && (digit !== lastEmitted || pauseSeen)) {
           lastEmitted = digit;
+          pauseSeen = false;
           emitted = digit;
         }
       }
@@ -147,6 +187,8 @@ export function createGoertzelDetector(): GoertzelDetector {
 
     reset(): void {
       buffer = [];
+      silentRun = 0;
+      pauseSeen = false;
       candidate = null;
       consecutive = 0;
       lastEmitted = null;
