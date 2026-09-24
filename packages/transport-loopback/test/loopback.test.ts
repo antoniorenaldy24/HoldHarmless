@@ -281,10 +281,17 @@ describe('loopback link (acceptance 1.3)', () => {
     assert.equal(session.playout.overflowCount(), 0, 'the far end could not drain the queue in real time');
     // And the other direction. An underflow inserts comfort silence INTO the
     // audio, which used to surface here as a mysterious extra digit rather than
-    // as what it is — a host that could not keep the stream fed. The decoder no
-    // longer splits a digit on one such hole, and this says so out loud when the
-    // machine is too slow to run this test honestly.
-    assert.equal(session.underflowCount(), 0, 'the sender was starved: this run measured the host, not the decoder');
+    // as what it is — a host that could not keep the stream fed.
+    //
+    // The bound is E1's own measurement, not a guess: "TELEPHONY produced 0–2
+    // [underflow ticks] per 20-digit trial" (ADR-013). Asserting zero was
+    // wrong — it contradicted the recorded range, and a CI runner produced one
+    // the first time it ran. What changed with the repeat guard is that a hole
+    // no longer corrupts the decode, so the count is a report on the host and
+    // the decoded string is the criterion.
+    const underflows = session.underflowCount();
+    console.log(`      far-end underflow ticks: ${underflows} (E1 measured 0-2)`);
+    assert.ok(underflows <= 2, `the sender was starved ${underflows} times: this run measured the host, not the decoder`);
     assert.equal(decoded, digits);
     await transport.hangup();
   });
