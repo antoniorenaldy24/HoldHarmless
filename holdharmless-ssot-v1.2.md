@@ -209,6 +209,10 @@ All thirteen mutable probes returned `session.updated`. Both immutable probes re
 
 **The lock is earlier than this document originally claimed.** The server's own message is *"'output.voice' cannot be changed after the first session.update"* — not after `session.ready`. The practical consequence is unchanged, because the first `session.update` is where these are set, but it removes a window that never existed: there is no moment between the first update and `session.ready` in which a correction could land.
 
+**A partial `session.update` MERGES; it does not replace (measured 2026-09-24, module 3.5).** This question is load-bearing for ADR-010: every phase change sends an update carrying `input.transcription_mode` and nothing else, and if that replaced the session it would take `tools` with it — every tool on the call silently disarmed from the first phase change, with nothing in the transcript to show it. The server answers directly. Its `session.updated` echo after a mode-only update still carries the full `tools` array, and capture worked on every turn after it. Updates sent WHILE a reply is outstanding are also harmless: three of them, three captures. Fourteen of fifteen captures across two probe runs and five mid-session updates, the one miss being an ASR-dropped digit of the kind A-24 already characterizes. `scripts/session-update-merge.ts`, `results/session-update-merge.json`.
+
+**The server's echo also states the turn-detection defaults this account runs with**: `vad_threshold` 0.5, `min_silence` 1000 ms, `max_silence` 3000 ms, `interruption_delay` null. ADR-009 declines to set the two silences; this records what declining leaves in place.
+
 **Constraint.** ADR-009 excludes `min_silence` and `max_silence`. ADR-010 and ADR-011 supply the per-position levers that remain.
 
 **This is the primary technical claim made to judges:** one agent that changes its interruption policy, transcription accuracy mode, and persona according to who is detected at the other end of the line.
@@ -294,7 +298,18 @@ The consequence is easy to miss: ADR-007's "seconds of speech already queued whe
 
 **Accepted trade-off.** `max_accuracy` applies from the first human turn, including the greeting, because phase does not subdivide the human conversation further (§5.2). A slightly longer endpoint during a fifteen-second greeting is a smaller cost than an extra phase with its own producer.
 
-**Gated on A-13.**
+**Gated on A-13 — and the gate did not pass (measured 2026-09-24, module 3.5).** A-13 was written with two clauses, and both were tested on the same rendered numbers:
+
+| Clause | Bar | Measured |
+|---|---|---|
+| Capture accuracy improves | better than `balanced` | **No improvement.** `balanced` 45/45 exact across three runs; `max_accuracy` 44/45, the single miss being a dropped digit. Both are at the ceiling this rig can measure |
+| `perceived_response_ms` does not regress by more than 300 ms | ≤ 300 ms | **~5.5 s.** End of the representative's audio to the agent's first reply byte: `balanced` median 1397 ms (range 1287–4544), `max_accuracy` median 6871 ms (range 6571–7026). The ranges do not overlap |
+
+**What the measurement does not settle.** The two arms were two sessions, so the latency gap could in principle belong to the session rather than to the mode. The run built to control for that — alternating the mode inside one session — lost capture on every turn after its first update, in both modes, and the probe above then showed that updating mid-session is not what breaks capture. That arm is unexplained and is used as evidence for nothing; the between-session comparison is what stands, with its limitation stated.
+
+**The failure this ADR claims to prevent was then tested directly, and `max_accuracy` does not prevent it.** A 900 ms pause was injected into the middle of the spoken number — a representative looking at their screen mid-spelling. Across 28 trials in two runs, capture failed in **all 28, in both modes**: the turn splits at the pause, and the agent asks for the number again ("I didn't catch the full number. Could you please repeat that?"). It does not record a half number, which is the harm §8.2 guards; it loses the turn. `max_accuracy` behaved exactly as `balanced` did. So the mid-spelling split is real, and `transcription_mode` is not the lever that answers it.
+
+**This is left as a decision, not taken.** The table above still says `max_accuracy`, and the evidence says it buys nothing measurable and costs about five seconds of perceived response. Changing it changes a decision record, so it belongs to the project owner, not to this measurement. `results/a24-capture.json`.
 
 ### ADR-011 — `interruption_delay` complements semantic barge-in
 
@@ -1581,6 +1596,10 @@ Eight tools. Each has a named producer row in §5.3 or §5.4, or an explicitly n
 | Correction path | `confirm_readback(matched: false, corrected_value)` replaces `capturedAuthNumber` and returns to `EXCHANGE` | — |
 | Far-end sanity check | After capture, look for the value in far-end speech, allowing for spelled letters and spoken digits | If absent, record `auth_number_capture_suspect` — **a review signal, not a rejection** |
 
+**A correction is understood; a correction is not always heard correctly (A-15, 2026-09-24).** Forty trials across two runs, with the representative cutting in mid-number, gave `confirm_readback(matched: false)` forty times out of forty — the behaviour this phase exists for is reliable, including the judgement that an interruption is a correction rather than noise. What was not reliable is the value: 36 of 40 carried the corrected number exactly, and all four misses are one recognizer error, the spoken digit "four" transcribed as the word "for" ("E as in Echo, for 76-72" for E476-72). `transcription_prompt` was run as the second arm and moved neither case.
+
+The consequence is worth stating plainly, because it is the design working rather than failing. A dropped digit in a correction means the stored value is wrong again, the agent reads the wrong value back again, and the representative corrects it again — `readbackAttempts` increments, and at `READBACK_ATTEMPT_LIMIT` the call escalates to a human with the number in dispute. Nothing silently records a wrong number; the cost is turns, and the visible symptom is a call that escalates over a digit. That the sanity check below cannot help here follows from the same sentence it already states: the error is in the transcript.
+
 **The sanity check cannot see a recognition error, and must not be credited with doing so.** It looks for the captured value in far-end speech — but "far-end speech" is itself the ASR transcript, which is where a recognition error already lives. A-24 demonstrated this directly: both failed numbers appeared verbatim in the transcript the model read, so `auth_number_capture_suspect` would not have fired for either. The check catches model-versus-transcript divergence. Recognition error is caught by `READBACK`, not here.
 
 **Why the sanity check is separated from the integrity check.** They fail for different reasons and demand different responses. A capture that does not appear in far-end speech is most likely a recognition problem; a `record_outcome` that contradicts a stored capture is a model-reliability problem. Combining them would hide the only signal that distinguishes a bug from an untrustworthy model, and would make a recognition failure non-retryable — correct for the second case and badly wrong for the first.
@@ -2852,7 +2871,7 @@ The last four rows are completeness checks. A `?` in any of them fails the build
 | `clear` fails to empty the playout queue | Major — the silence guarantee becomes theatre | ADR-008, INV-3 checks the queue is empty, A-3 |
 | Agent falls silent repeatedly during normal conversation | Reads as a nervous system on stage | `gate_false_close_count`, `agent_mute_during_conversation_ms`, A-27 |
 | `session.update` rejected for an unknown field | Navigation fails from the first minute | E0 at Day 0 |
-| Number truncated while being spelled | Attacks `task_success_rate` invisibly | Capture-by-tool, `max_accuracy`, `interruption_delay`, A-13 |
+| Number truncated while being spelled | Attacks `task_success_rate` invisibly | Capture-by-tool, `interruption_delay`, A-13. **`max_accuracy` is no longer claimed here: A-13 measured it failing this case exactly as `balanced` does, 28/28 (ADR-010). What holds is that the agent asks again rather than recording half a number** |
 | Correction during read-back not captured | A wrong number recorded as success | `interrupt_response: true`, `confirm_readback`, A-15 |
 | Backchannel cuts the agent off | Reads as a nervous system | Semantic barge-in plus `interruption_delay`, A-14 |
 | Hold-exit threshold set by whoever tuned last | Either false exits or permanent `UNKNOWN` | Written operating point (§6.7), ramp floor and cap |
@@ -2987,7 +3006,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | 3.2 | Phase producers | `capture_auth_number` and `confirm_readback` drive every phase transition; `readbackAttempts` has one writer; phase timeouts route to escalation. **Done 2026-09-24: every §5.4 row has a test, one writer proven by trying every other tool and both timers, and a `CLOSING` or `DONE` tick reports no escalation** |
 | 3.3 | Validation §8.5 | All five status rules; §8.5.1 rejects bare boilerplate; idempotency on `requestId`; **A-24 confirmed at scale**. **Done 2026-09-24: the Work Queue keys idempotency on `requestId` with INV-18's two writers and INV-19's safety net; A-24 closed at 20/20 (`results/a24-capture.json`)** |
 | 3.4 | Closing and escalation | All five §8.6 paths produce a summary with `[URGENCY]`; outcome before closing on every path; `DONE` produced only by `reply.done`; **A-23 passes**. **Done 2026-09-24: all five paths tested, INV-20 checked in both orders so the check is not vacuous, and A-23 run as 10 escalation calls dropped after the closing — escalated 10 of 10, zero redials** |
-| 3.5 | Read-back path | **A-15 passes**; **A-13 measured** |
+| 3.5 | Read-back path | **A-15 passes**; **A-13 measured**. **Done 2026-09-24 in `apps/core/src/readback.ts`: §8.2's two checks are separate objects of study — the far-end sanity check emits `auth_number.suspect` and never a violation, the integrity check emits `tool.rejected` and `safety.violation` under one `toolCallId` and is never retried. A-15 run twice (20/20 on the mismatch, 18/20 on the value); A-13 run and both its clauses refuted (ADR-010). Eight mutations, eight killed — the two that survived the first pass named two real gaps and both now have tests** |
 | 3.6 | Work Queue and panel 8 | Refuses redial on a final status; **A-16 passes**; escalation cards render; "mark handled" writes `escalated_resolved` |
 | 3.7 | Failure paths | **A-22 passes** — every position ends where §5.7 says when the far end goes silent |
 | 3.8 | `apps/dashboard` | All eight panels live; gate timeline overlaid on channel timeline; every panel labelled with its network profile; redaction mode functional |
@@ -3020,9 +3039,9 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-10** | Credit covers the project | **Medium** | Rolling average ≤ `budgetForDay(day)`; no session ever left unclosed |
 | **A-11** | The gate closes before the agent can speak when a hold begins | **Fatal** | 20 transitions with cue + 2 s pause + hold audio, plus 5 silent holds. **Zero milliseconds** of agent speech at the harness; `hold_entry_latency_ms` p90 < 800 ms. **Run 2026-09-23 at 6 + 2 transitions (the suite's count; the full 20 + 5 belongs in the rehearsal): zero audible milliseconds, p90 332 ms.** The latency is the ASR delta (300 ms simulated) plus the transport, so it is bounded by recognition, not by the gate |
 | **A-12** | Disclosure reaches every party on an announced transfer | **Fatal to ethical credibility** | 10 calls, two personas. `disclosuresDelivered ≥ parties_used` in **10 of 10** |
-| **A-13** | `max_accuracy` improves capture of spelled numbers | **High** | 30 read-outs, `balanced` vs `max_accuracy`. Capture accuracy improves; `perceived_response_ms` does not regress by more than 300 ms |
+| **A-13** | `max_accuracy` improves capture of spelled numbers | **High** | 30 read-outs, `balanced` vs `max_accuracy`. Capture accuracy improves; `perceived_response_ms` does not regress by more than 300 ms. **Run 2026-09-24: BOTH CLAUSES FAIL. No accuracy improvement (`balanced` 45/45, `max_accuracy` 44/45); perceived response regresses by ~5.5 s, not 300 ms. A 900 ms mid-spelling pause defeats capture in BOTH modes, 28/28. See ADR-010 — the decision to change the table is the owner's** |
 | **A-14** | Semantic barge-in plus `interruption_delay` withstands backchannel | **High** | 20 backchannel events across three delay settings. Zero cut-offs at the chosen value; genuine interruptions still cut within 400 ms |
-| **A-15** | A correction during read-back is captured as a mismatch | **High** | 20 read-backs interrupted at the third character. `confirm_readback(matched:false)` in 20/20; **zero** wrong numbers recorded |
+| **A-15** | A correction during read-back is captured as a mismatch | **High** | 20 read-backs interrupted at the third character. `confirm_readback(matched:false)` in 20/20; **zero** wrong numbers recorded. **Run 2026-09-24 twice, 20 trials each: FIRST CLAUSE PASSES — `matched:false` in 20/20, every time, with the correction cutting in mid-number. SECOND CLAUSE FAILS — 18/20 carried the corrected value exactly; the two misses are one recognizer error, the spoken digit "four" transcribed as the word "for", and `transcription_prompt` did not move either of them. `results/a15-readback.json`, `results/a15-readback-baseline.json`** |
 | **A-16** | A redial after a drop produces no duplicate request | **Medium** | Drop the link after the number is given but before `record_outcome`; the second call does not resubmit |
 | **A-17** | *(reserved — carrier stream limits, not applicable to this transport)* | — | Not run. Recorded so a carrier build knows it is open |
 | **A-18** | `interruption_delay` is accepted on this account | **Medium** | **CLOSED 2026-09-21.** `session.updated` observed. `ENABLE_INTERRUPTION_DELAY = true` in §13 |

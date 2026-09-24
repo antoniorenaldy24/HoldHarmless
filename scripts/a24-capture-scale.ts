@@ -42,14 +42,16 @@ if (!KEY) { console.error('ASSEMBLYAI_API_KEY is empty (.env)'); process.exit(1)
 
 const arg = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 const COUNT = Number(arg('count') ?? 30);
+/** Silence injected into the middle of the number, to test the endpointer. */
+const GAP_MS = Number(arg('gap') ?? 0);
 /**
  * ONE LEVER PER ARM. The first run put both levers in a single "tuned" arm and
  * could not say which of them did what — a basic error, and it mattered: the
  * pattern turned out to SUPPRESS the tool call (16 of 30 captures never
  * happened), which a combined arm would have blamed on the prompt.
  */
-type Arm = 'baseline' | 'prompt' | 'pattern';
-const ARMS = (arg('arm') ? [arg('arm')!] : ['baseline', 'prompt', 'pattern']) as Arm[];
+type Arm = 'baseline' | 'prompt' | 'pattern' | 'balanced' | 'interleaved';
+const ARMS = (arg('arm') ? arg('arm')!.split(',') : ['baseline', 'prompt', 'pattern']) as Arm[];
 const AUDIO_DIR = path.join(ROOT, 'logs', 'a24-audio');
 
 // ---------------------------------------------------------------------------
@@ -178,13 +180,21 @@ const TRANSCRIPTION_PROMPT =
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Trial = { value: string; captured: string | null; transcript: string; exact: boolean };
+type Trial = { value: string; captured: string | null; transcript: string; exact: boolean; replyMs: number | null; spokeIntoGap?: boolean; agentSaid?: string; mode?: string };
 
 async function runArm(arm: Arm, values: string[], audio: Map<string, Uint8Array[]>): Promise<Trial[]> {
   const withPattern = arm === 'pattern';
   const withPrompt = arm === 'prompt';
+  // A-13's arm: the same recordings at `balanced` instead of `max_accuracy`.
+  const mode = arm === 'balanced' ? 'balanced' : 'max_accuracy';
+  // The two arms above are two SESSIONS, so a difference between them could
+  // belong to the session rather than to the mode. This arm alternates the mode
+  // inside ONE session, which is also what ADR-010 asks the call to do.
+  const interleaved = arm === 'interleaved';
   const captured: { value: string | null } = { value: null };
   const transcript: string[] = [];
+  /** What the agent said — with a gap, this is how the split turn shows itself. */
+  const agentSaid: string[] = [];
   const session = new AgentSession({
     url: (process.env['ASSEMBLYAI_WS_URL'] ?? 'wss://agents.assemblyai.com/v1/ws').trim(),
     apiKey: KEY!,
@@ -197,14 +207,38 @@ async function runArm(arm: Arm, values: string[], audio: Map<string, Uint8Array[
     captured.value = typeof value === 'string' ? value : null;
     session.queueToolResult(id, { ok: true });
   });
-  session.onTurn((speaker, text) => { if (speaker === 'far_end') transcript.push(text); });
+  session.onTurn((speaker, text) => { (speaker === 'far_end' ? transcript : agentSaid).push(text); });
+  // A-13's second clause: max_accuracy must not cost more than 300 ms of
+  // perceived response. Measured from the end of the representative's audio to
+  // the agent's first reply byte.
+  // Measured from the END of this trial's audio, and only for audio that
+  // arrives after it: the agent's acknowledgement of the PREVIOUS number
+  // overlaps the next one's playback, and counting that gave a median of
+  // minus twelve seconds in the first run — a number that could only be wrong.
+  const reply: { since: number; at: number | null; done: boolean } = { since: 0, at: null, done: true };
+  // A-13's real claim is not accuracy, it is ENDPOINTING: that on `balanced` the
+  // turn ends at a pause mid-spelling and the agent answers half a number
+  // (SSOT §5.5). Audio rendered in one breath never tests that, so --gap
+  // injects a silence into the middle of the number, and this flag records
+  // whether the agent spoke INTO it.
+  // `inside` stays true from the start of the gap until the LAST frame of the
+  // number. A reply to the truncated first half cannot arrive inside the pause
+  // itself — the endpointer waits, then the model generates — so a window that
+  // closes with the pause sees nothing, which is what the first gap run did.
+  const gap = { inside: false, interrupted: false };
+  session.onReplyAudio(() => {
+    if (gap.inside) gap.interrupted = true;
+    if (performance.now() >= reply.since && reply.at === null) reply.at = performance.now();
+  });
+  session.onReplyStarted(() => { reply.done = false; });
+  session.onReplyDone(() => { reply.done = true; });
 
   const trials: Trial[] = [];
   try {
     await session.connect({
       systemPrompt: SYSTEM_PROMPT,
       tools: [CAPTURE_TOOL(withPattern)],
-      transcriptionMode: 'max_accuracy',
+      transcriptionMode: mode,
       keyterms: ['authorization number', 'prior authorization', 'as in', 'dash'],
       interruptResponse: false,
       voice: 'michael',
@@ -214,13 +248,40 @@ async function runArm(arm: Arm, values: string[], audio: Map<string, Uint8Array[
     });
 
     for (const [index, value] of values.entries()) {
+      // One trial at a time: wait for the previous reply to finish, so the two
+      // never overlap and the latency below belongs to this number.
+      const settle = Date.now() + 8000;
+      while (!reply.done && Date.now() < settle) await sleep(50);
+      const trialMode = interleaved ? (index % 2 === 0 ? 'balanced' : 'max_accuracy') : mode;
+      if (interleaved) await session.update({ transcriptionMode: trialMode });
       captured.value = null;
       transcript.length = 0;
+      agentSaid.length = 0;
+      reply.at = null;
+      // Nothing counts until this trial's audio has finished. Leaving the old
+      // mark in place let the PREVIOUS turn's acknowledgement — which plays
+      // while this number is still being sent — be timed against this trial,
+      // and produced a median of minus twelve seconds.
+      reply.since = Number.POSITIVE_INFINITY;
+      gap.interrupted = false;
       const frames = audio.get(value)!;
-      for (const frame of frames) {
+      // Halfway through the clip is inside the number: the carrier sentence
+      // ("Okay, your authorization number is") is the shorter half.
+      const at = GAP_MS > 0 ? Math.floor(frames.length / 2) : -1;
+      for (const [i, frame] of frames.entries()) {
+        if (i === at) {
+          gap.inside = true;
+          for (let g = 0; g < Math.round(GAP_MS / FRAME_MS); g++) {
+            session.sendAudio(new Uint8Array(BYTES_PER_FRAME).fill(0xff));
+            await sleep(FRAME_MS);
+          }
+        }
         session.sendAudio(frame);
         await sleep(FRAME_MS);
       }
+      gap.inside = false;
+      const spokeUntil = performance.now();
+      reply.since = spokeUntil;
       // Silence, so the endpointer closes the turn, then time for the tool call.
       for (let i = 0; i < 40; i++) {
         session.sendAudio(new Uint8Array(BYTES_PER_FRAME).fill(0xff));
@@ -228,8 +289,19 @@ async function runArm(arm: Arm, values: string[], audio: Map<string, Uint8Array[
       }
       const until = Date.now() + 8000;
       while (captured.value === null && Date.now() < until) await sleep(50);
+      // Let the acknowledgement play out here, not into the next trial.
+      const quiet = Date.now() + 6000;
+      while ((!reply.done || reply.at === null) && Date.now() < quiet) await sleep(50);
 
-      const trial: Trial = { value, captured: captured.value, transcript: transcript.join(' '), exact: captured.value === value };
+      const trial: Trial = {
+        value,
+        captured: captured.value,
+        transcript: transcript.join(' '),
+        exact: captured.value === value,
+        replyMs: reply.at === null ? null : Math.round(reply.at - spokeUntil),
+        ...(GAP_MS > 0 ? { spokeIntoGap: gap.interrupted, agentSaid: agentSaid.join(' ') } : {}),
+        ...(interleaved ? { mode: trialMode } : {}),
+      };
       trials.push(trial);
       console.log(`  ${arm.padEnd(8)} ${String(index + 1).padStart(2)}/${values.length}  ${trial.exact ? 'ok  ' : 'MISS'} spoken ${value.padEnd(12)} captured ${String(trial.captured).padEnd(12)}${trial.exact ? '' : ` | heard: ${trial.transcript.slice(0, 90)}`}`);
     }
@@ -263,7 +335,17 @@ console.log('\nA-24 at scale');
 for (const [arm, trials] of Object.entries(results)) {
   const exact = trials.filter((t) => t.exact).length;
   const noCapture = trials.filter((t) => t.captured === null).length;
-  console.log(`  ${arm.padEnd(8)} ${exact}/${trials.length} exact (${((exact / trials.length) * 100).toFixed(1)}%), ${noCapture} with no tool call`);
+  const replies = trials.map((t) => t.replyMs).filter((m): m is number => m !== null).sort((a, b) => a - b);
+  const median = replies.length ? replies[Math.floor(replies.length / 2)]! : NaN;
+  const intoGap = trials.filter((t) => t.spokeIntoGap === true).length;
+  console.log(`  ${arm.padEnd(8)} ${exact}/${trials.length} exact (${((exact / trials.length) * 100).toFixed(1)}%), ${noCapture} with no tool call, reply median ${Number.isNaN(median) ? 'n/a' : `${median} ms`}${GAP_MS > 0 ? `, spoke into the ${GAP_MS} ms gap in ${intoGap}` : ''}`);
+  // The interleaved arm carries both modes, so its own split is the comparison.
+  for (const m of ['balanced', 'max_accuracy']) {
+    const sub = trials.filter((t) => t.mode === m);
+    if (sub.length === 0) continue;
+    const r = sub.map((t) => t.replyMs).filter((x): x is number => x !== null).sort((a, b) => a - b);
+    console.log(`    within one session, ${m.padEnd(12)} ${sub.filter((t) => t.exact).length}/${sub.length} exact, reply median ${r.length ? `${r[Math.floor(r.length / 2)]} ms` : 'n/a'}  [${r.join(', ')}]`);
+  }
 }
 const base = results['baseline'];
 for (const arm of ['prompt', 'pattern'] as const) {

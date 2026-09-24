@@ -1,0 +1,518 @@
+{
+  "probe": "session.update merge or replace",
+  "ranAt": "2026-09-24T13:54:12.050Z",
+  "phases": [
+    {
+      "name": "1 tools set at connect",
+      "values": [
+        "C965-96",
+        "PA4921679"
+      ],
+      "got": [
+        "C965-96",
+        "PA4921679"
+      ]
+    },
+    {
+      "name": "2 update: mode only",
+      "values": [
+        "QA5393",
+        "Q109-64"
+      ],
+      "got": [
+        "QA5393",
+        "Q109-64"
+      ]
+    },
+    {
+      "name": "3 update: mode AND tools",
+      "values": [
+        "HH4154",
+        "CJ7762"
+      ],
+      "got": [
+        "HH154",
+        "CJ7762"
+      ]
+    },
+    {
+      "name": "4 update mid-reply",
+      "values": [
+        "L196-06",
+        "PA8791010",
+        "LM0522"
+      ],
+      "got": [
+        "L196-06",
+        "PA8791010",
+        "LM0522"
+      ]
+    }
+  ],
+  "updates": [
+    {
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "max_accuracy",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "type": "session.updated",
+      "timestamp": 1790257882.4598985
+    },
+    {
+      "session_id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "max_accuracy",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "expires_at": 1790261477,
+      "type": "session.ready",
+      "timestamp": 1790257882.4754317
+    },
+    {
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "balanced",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "type": "session.updated",
+      "timestamp": 1790257922.3621545
+    },
+    {
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "max_accuracy",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "type": "session.updated",
+      "timestamp": 1790257957.4069061
+    },
+    {
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "balanced",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "type": "session.updated",
+      "timestamp": 1790257994.6411443
+    },
+    {
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "balanced",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "type": "session.updated",
+      "timestamp": 1790258012.5897205
+    },
+    {
+      "config": {
+        "id": "sess_2213fe226f914a1cafcc45efd5fc35d7",
+        "system_prompt": "You are on a telephone call with a health insurance representative. When they give you an authorization number, call capture_auth_number with it immediately. Keep replies to one short sentence.",
+        "greeting": null,
+        "input": {
+          "type": "audio",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "turn_detection": {
+            "type": null,
+            "vad_threshold": 0.5,
+            "interrupt_response": false,
+            "min_silence": 1000,
+            "max_silence": 3000,
+            "interruption_delay": null
+          },
+          "keyterms": null,
+          "transcription_mode": "balanced",
+          "continuous_partials": null,
+          "transcription_prompt": null,
+          "language_codes": null,
+          "voice_focus": null,
+          "voice_focus_threshold": null
+        },
+        "output": {
+          "type": "audio",
+          "voice": "michael",
+          "format": {
+            "encoding": "audio/pcmu"
+          },
+          "volume": null
+        },
+        "tools": [
+          {
+            "type": "function",
+            "name": "capture_auth_number",
+            "description": "Record the authorization number the representative just gave. Call this as soon as you have heard it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "The number exactly as given, e.g. \"A472-91\"."
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "timeout_seconds": 120,
+            "execution_mode": "interactive",
+            "http": null,
+            "response_instructions": null,
+            "deployment_id": null,
+            "session_update": null,
+            "image_tag": null
+          }
+        ],
+        "llm": [],
+        "pre_connect_requests": []
+      },
+      "type": "session.updated",
+      "timestamp": 1790258033.0264802
+    }
+  ]
+}
