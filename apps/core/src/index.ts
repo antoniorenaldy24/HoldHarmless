@@ -6,3 +6,4 @@ export * from './escalation.js';
 export * from './readback.js';
 export * from './effects.js';
 export * from './escalation-tasks.js';
+export * from './silence-recovery.js';

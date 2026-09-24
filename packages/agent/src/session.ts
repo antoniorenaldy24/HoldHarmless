@@ -29,7 +29,8 @@
  * carries calls today, not a fallback.
  */
 
-import type { GateIntent, ToolName } from '@holdharmless/events';
+import type { GateIntent, ReplyProduct, ToolName } from '@holdharmless/events';
+import { gateAdmitsProduct } from '@holdharmless/events';
 import { AgentTranscriptAssembler, type AgentMessage, type Scheduler } from './agent-transcript.js';
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ export type ReplyRefusal = 'gate_forbids_product' | 'hold_suspected' | 'reply_ou
  * The condition used to read "the gate is open", which forbade the useful case
  * along with the useless one.
  */
-export type ReplyProduct = 'speech' | 'dtmf';
+export type { ReplyProduct };
 
 export class ReplyRefused extends Error {
   constructor(readonly reason: ReplyRefusal) {
@@ -106,7 +107,7 @@ export class SessionError extends Error {
 
 /** Events this class reports for the log (§9.3); the core assigns seq. */
 export type AgentEvent =
-  | { t: 'reply.requested'; cause: ReplyCause; instructions?: string }
+  | { t: 'reply.requested'; cause: ReplyCause; produces: ReplyProduct; instructions?: string }
   | { t: 'tool.result_discarded'; toolCallId: string; name: ToolName }
   | { t: 'session.resumed'; sessionId: string; gapMs: number }
   | { t: 'session.replaced'; previousSessionId: string; sessionId: string; gapMs: number; reason: string };
@@ -145,11 +146,10 @@ export type AgentSessionOptions = {
 
 const OPEN = 1;
 
-/** The gate rule of ADR-022 condition 1, as one testable function. */
-export function gateAdmitsProduct(gate: GateIntent, produces: ReplyProduct): boolean {
-  if (gate === 'open') return true;
-  return gate === 'dtmf_only' && produces === 'dtmf';
-}
+// gateAdmitsProduct moved to @holdharmless/events in module 3.7: INV-4 has to
+// apply the same rule, and it could not see this copy. Re-exported so callers
+// of this package keep working.
+export { gateAdmitsProduct };
 
 // ---------------------------------------------------------------------------
 // Payloads — §7.1
@@ -289,7 +289,7 @@ export class AgentSession {
     if (this.replyOutstanding || this.replyActive) throw new ReplyRefused('reply_outstanding');
 
     this.replyOutstanding = true;
-    this.emit({ t: 'reply.requested', cause, ...(oneShotInstructions !== undefined ? { instructions: oneShotInstructions } : {}) });
+    this.emit({ t: 'reply.requested', cause, produces, ...(oneShotInstructions !== undefined ? { instructions: oneShotInstructions } : {}) });
     this.send({ type: 'reply.create', ...(oneShotInstructions !== undefined ? { instructions: oneShotInstructions } : {}) });
   }
 

@@ -95,7 +95,7 @@ describe('each invariant fails on a log crafted to break it', () => {
 
   test('INV-4 — a recovery reply requested during hold', () => {
     const i = indexOf(APPROVED, (b) => b.t === 'channel.changed' && b.to === 'HOLD');
-    assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'silence_recovery' })), 'INV-4');
+    assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'silence_recovery', produces: 'speech' })), 'INV-4');
   });
 
   test('INV-4 — no cause is exempt during hold, escalation included', () => {
@@ -103,12 +103,23 @@ describe('each invariant fails on a log crafted to break it', () => {
     // type no longer admits that cause — so the only way to test the old hole is
     // to show that every remaining cause is refused.
     const i = indexOf(APPROVED, (b) => b.t === 'channel.changed' && b.to === 'HOLD');
-    assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'escalation_instruction' })), 'INV-4');
+    assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'escalation_instruction', produces: 'speech' })), 'INV-4');
+  });
+
+  test('INV-4 — a DTMF re-prompt passes a dtmf_only gate, and a spoken one does not', () => {
+    // §5.7's decision of 2026-09-23, which INV-4 did not carry until module 3.7.
+    // IVR silence recovery is a reply whose effect is send_dtmf, requested where
+    // the gate is dtmf_only: permitted. The same reply producing SPEECH there is
+    // the hold probe's mistake wearing a different hat.
+    const i = indexOf(APPROVED, (b) => b.t === 'prompt.loaded' && b.files.includes('IVR_DTMF.txt'));
+    const dtmf = ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'silence_recovery', produces: 'dtmf' }));
+    assert.ok(!failures(dtmf).includes('INV-4'), 'a DTMF reply at a dtmf_only gate is what §5.7 asks for');
+    assertFails(ctxOf(insertAfter(APPROVED, i, { t: 'reply.requested', cause: 'silence_recovery', produces: 'speech' })), 'INV-4');
   });
 
   test('INV-5 — three silence re-prompts where §5.7 allows two', () => {
     const i = indexOf(APPROVED, (b) => b.t === 'disclosure.delivered');
-    const r: CallEventBody = { t: 'reply.requested', cause: 'silence_recovery' };
+    const r: CallEventBody = { t: 'reply.requested', cause: 'silence_recovery', produces: 'speech' };
     assertFails(ctxOf(insertAfter(APPROVED, i, r, r, r)), 'INV-5');
   });
 

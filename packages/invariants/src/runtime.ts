@@ -12,6 +12,7 @@
  */
 
 import {
+  gateAdmitsProduct,
   isFinalStatus,
   PRODUCER_KINDS,
   type AuthRequest,
@@ -244,13 +245,20 @@ export const INVARIANTS: readonly Invariant[] = [
     id: 'INV-4',
     when: 'transition',
     description:
-      'No reply.requested while the gate is not open or hold is suspected — with no exceptions. The single ' +
-      'hold probe §6.7 once permitted was removed in v1.3: it fired where the gate is always closed.',
+      'No reply.requested unless the gate ADMITS WHAT THE REPLY MAY PRODUCE, and never while hold is suspected. ' +
+      'The hold probe §6.7 once permitted was removed in v1.3 because it fired where the gate is always closed; ' +
+      'IVR silence recovery, by contrast, produces DTMF and passes a dtmf_only gate (§5.7, ADR-022 condition 1).',
     check(ctx) {
       for (const s of replay(ctx.log)) {
         const e = s.event;
         if (e.t !== 'reply.requested') continue;
-        if (s.gate !== 'open') return `seq ${e.seq}: ${e.cause} reply requested while the gate was ${s.gate}`;
+        // Checked against the reply's own product, not against 'open'. Before
+        // module 3.7 this read `s.gate !== 'open'`, which was the rule §5.7's
+        // decision replaced on 2026-09-23 — so a correct IVR re-prompt would
+        // have been reported as a violation the moment one was built.
+        if (!gateAdmitsProduct(s.gate, e.produces)) {
+          return `seq ${e.seq}: ${e.cause} reply producing ${e.produces} requested while the gate was ${s.gate}`;
+        }
         if (s.holdSuspected) return `seq ${e.seq}: ${e.cause} reply requested while hold was suspected`;
       }
       return null;

@@ -258,7 +258,10 @@ describe('createReply under the three ADR-022 conditions', () => {
     await session.createReply('silence_recovery', 'Ask whether they are still there.');
     await waitFor('reply.create at the server', () => fake.sent(0, 'reply.create').length === 1);
     assert.deepEqual(fake.sent(0, 'reply.create'), [{ type: 'reply.create', instructions: 'Ask whether they are still there.', _auth: 'Bearer test-key' }]);
-    assert.deepEqual(events[0], { t: 'reply.requested', cause: 'silence_recovery', instructions: 'Ask whether they are still there.' });
+    // `produces` is logged, not merely checked: INV-4 audits the gate against
+    // what the reply was permitted to produce, and it can only do that if the
+    // log carries it (§5.7, module 3.7).
+    assert.deepEqual(events[0], { t: 'reply.requested', cause: 'silence_recovery', produces: 'speech', instructions: 'Ask whether they are still there.' });
     await session.end();
   });
 

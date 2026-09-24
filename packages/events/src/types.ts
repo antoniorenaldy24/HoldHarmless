@@ -220,6 +220,28 @@ export type TransportFaultKind =
   | 'jitter_underflow'
   | 'playout_overflow';
 
+/** What a reply may put on the line. ADR-022 condition 1 compares it to the gate. */
+export type ReplyProduct = 'speech' | 'dtmf';
+
+/**
+ * ADR-022 condition 1, as §5.7's decision refined it: not "the gate is open"
+ * but "the gate admits what the reply is permitted to produce".
+ *
+ * Its companion `gateFor` lives in `packages/callmodel`, and this one does not,
+ * for a reason worth stating. THREE places must apply this rule — the session
+ * that refuses a reply, INV-4 that audits the log, and the Call Model that
+ * decides — and `events` is the only package all three already depend on. It
+ * used to live inside the session, where INV-4 could not reach it, and INV-4
+ * went on enforcing the rule this decision replaced: "the gate is open, with no
+ * exceptions". An invariant that cannot see the rule it enforces enforces the
+ * old one.
+ */
+export function gateAdmitsProduct(gate: GateIntent, produces: ReplyProduct): boolean {
+  if (gate === 'open') return true;
+  // The refinement in one line: DTMF passes a dtmf_only gate, speech does not.
+  return gate === 'dtmf_only' && produces === 'dtmf';
+}
+
 export type CallEventBody =
   | { t: 'call.started'; requestId: string; attempts: number; priority: string; networkProfile: string }
   | { t: 'channel.changed'; from: Channel; to: Channel; producer: Producer }
@@ -267,6 +289,15 @@ export type CallEventBody =
        */
       cause: 'silence_recovery' | 'escalation_instruction';
       instructions?: string;
+      /**
+       * What this reply is permitted to produce. Added in v1.3 with §5.7's
+       * decision: ADR-022's first condition became "the gate admits what the
+       * reply is permitted to produce", and IVR silence recovery is the case it
+       * was refined for — a reply whose effect is a send_dtmf call, requested
+       * while the gate is `dtmf_only`. Without this field INV-4 can only ask
+       * whether the gate was open, which is the rule the decision replaced.
+       */
+      produces: ReplyProduct;
     }
   | { t: 'disclosure.delivered'; partyIndex: number; quote: string }
   | { t: 'party.changed'; reason: 'transfer' | 'long_hold' | 'ivr_return'; newIndex: number }

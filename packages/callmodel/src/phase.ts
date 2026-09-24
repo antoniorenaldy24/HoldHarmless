@@ -44,7 +44,7 @@ export type PhaseState = {
 export type PhaseOptions = {
   emit?: (event: CallEventBody) => void;
   /** Called when a phase change requires the §8.6 escalation summary. */
-  onEscalation?: (cause: 'readback_limit' | 'phase_timeout' | 'tool') => void;
+  onEscalation?: (cause: 'readback_limit' | 'readback_reprompt' | 'phase_timeout' | 'tool') => void;
   initial?: Partial<PhaseState>;
 };
 
@@ -58,6 +58,14 @@ export interface PhaseMachine {
   onClosingTurnComplete(status: 'completed' | 'interrupted'): void;
   /** Accumulated HUMAN time; the backstop for tool-driven transitions (§5.4). */
   addHumanTime(ms: number): void;
+  /**
+   * §5.7's after-limit action for READBACK: the far end went silent and the
+   * re-prompt limit was reached. §5.4 lists this as a producer of
+   * READBACK → CLOSING in its own right — "readbackAttempts reaches 3, OR the
+   * read-back re-prompt limit" — so it is a timer, not a tool, and it does not
+   * touch readbackAttempts, which has exactly one writer.
+   */
+  onRecoveryLimit(): void;
   reset(): void;
 }
 
@@ -158,6 +166,12 @@ export function createPhaseMachine(options: PhaseOptions = {}): PhaseMachine {
       if (status !== 'completed') return;
       closingTurnComplete = true;
       maybeFinishClosing({ kind: 'session', event: 'reply.done' });
+    },
+
+    onRecoveryLimit(): void {
+      if (state.phase !== 'READBACK') return;
+      escalated('readback_reprompt');
+      move('CLOSING', { kind: 'timer', name: 'READBACK_SILENCE_REPROMPT_LIMIT' }, 'escalation');
     },
 
     addHumanTime(ms: number): void {
