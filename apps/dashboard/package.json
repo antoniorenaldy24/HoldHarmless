@@ -3,13 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Reader of the event log. Holds no state and sends no commands except demo controls and 'mark handled' on panel 8 (SSOT §11).",
+  "description": "Reader of the event log. Holds no state and sends no commands except demo controls and 'mark handled' on panel 8 (SSOT \u00a711).",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@holdharmless/core": "workspace:*",
     "gsap": "^3.13.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

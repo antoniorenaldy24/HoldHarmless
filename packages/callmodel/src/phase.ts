@@ -25,7 +25,7 @@
  *    action writes the outcome deterministically, and the latch does the rest.
  */
 
-import type { CallEventBody, ClosingKind, Outcome, Phase, Producer, ToolName } from '@holdharmless/events';
+import type { CallEventBody, ClosingKind, Phase, Producer, ToolName } from '@holdharmless/events';
 import { policyFor } from './policy.js';
 import { positionId } from './positions.js';
 

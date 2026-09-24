@@ -1784,6 +1784,11 @@ type AuthRequestStatus =
 const FINAL_STATUSES = [
   'approved', 'denied', 'pending_info', 'escalated', 'escalated_resolved',
 ] as const;
+```
+
+**`in_progress` has one writer, and until module 3.6 it had none.** `WorkQueue.scheduleRedial` sets it, in the same statement that increments `attempts`: a request being dialled right now and a request waiting to be dialled are different things, panel 1 shows "full status", and nothing in the product had ever written the difference down. It is deliberately NOT routed through `updateStatus`, which emits `outcome.written` — `in_progress` is not an outcome, and `call.started` already carries `requestId` and `attempts` into the log.
+
+```typescript
 
 type AuthRequest = {
   id: string;
@@ -2148,6 +2153,10 @@ A reader of the event log. It holds no state and sends no commands except demo c
 | 8 | **Escalation Tasks** | One card per `escalate_to_human`, showing `context_summary`, captured reference, urgency, and a **mark handled** button that sets `escalated_resolved` |
 
 Panel 8 is the destination ADR-014 depends on. An escalation with no destination is not a handoff.
+
+**Built in module 3.6, ahead of the other seven**, because the Work Queue module is where that destination is owed. What a card contains, and in what order cards are worked, is `escalationCards` in `apps/core/src/escalation-tasks.ts` — a projection over the event log, tested there, because the dashboard holds no state and may not decide this. Three rules in it are worth naming: a card comes from `escalation.summary` OR an `escalate_to_human` call, since §8.6's deterministic paths never call the tool; a later summary replaces an earlier one, since tier 2 rewrites a summary INV-9 rejected; and an escalation whose summary never reached the log still gets a card, saying so — a person is waiting for a call back, and a blank panel would agree with the bug.
+
+The panel renders from a clearly labelled SAMPLE until the event feed lands in module 3.8. A dashboard showing invented data without saying so is worse than one showing nothing.
 
 ---
 
@@ -3011,7 +3020,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | 3.3 | Validation §8.5 | All five status rules; §8.5.1 rejects bare boilerplate; idempotency on `requestId`; **A-24 confirmed at scale**. **Done 2026-09-24: the Work Queue keys idempotency on `requestId` with INV-18's two writers and INV-19's safety net; A-24 closed at 20/20 (`results/a24-capture.json`)** |
 | 3.4 | Closing and escalation | All five §8.6 paths produce a summary with `[URGENCY]`; outcome before closing on every path; `DONE` produced only by `reply.done`; **A-23 passes**. **Done 2026-09-24: all five paths tested, INV-20 checked in both orders so the check is not vacuous, and A-23 run as 10 escalation calls dropped after the closing — escalated 10 of 10, zero redials** |
 | 3.5 | Read-back path | **A-15 passes**; **A-13 measured**. **Done 2026-09-24 in `apps/core/src/readback.ts`: §8.2's two checks are separate objects of study — the far-end sanity check emits `auth_number.suspect` and never a violation, the integrity check emits `tool.rejected` and `safety.violation` under one `toolCallId` and is never retried. A-15 run twice (20/20 on the mismatch, 18/20 on the value); A-13 run and both its clauses refuted (ADR-010). Eight mutations, eight killed — the two that survived the first pass named two real gaps and both now have tests. The checks are wired into the tool handler and two further mutations unwire them, so a check that stops being asked fails the suite** |
-| 3.6 | Work Queue and panel 8 | Refuses redial on a final status; **A-16 passes**; escalation cards render; "mark handled" writes `escalated_resolved` |
+| 3.6 | Work Queue and panel 8 | Refuses redial on a final status; **A-16 passes**; escalation cards render; "mark handled" writes `escalated_resolved`. **Done 2026-09-24: `apps/core/src/effects.ts` is the first real implementation of `ToolEffects` — until now only tests implemented it, so `capture_reference` had never once written `lastReference` outside an assertion. A-16 passes end to end. Panel 8 renders from `escalationCards`, a projection over the log with its own tests, including the card for an escalation whose summary never arrived (INV-9) — hiding that one would make the screen agree with the bug. Eight mutations: five killed outright, two named untested guarantees the file's own header claimed, and one exposed an unreachable branch that was deleted** |
 | 3.7 | Failure paths | **A-22 passes** — every position ends where §5.7 says when the far end goes silent |
 | 3.8 | `apps/dashboard` | All eight panels live; gate timeline overlaid on channel timeline; every panel labelled with its network profile; redaction mode functional |
 
@@ -3046,7 +3055,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-13** | `max_accuracy` improves capture of spelled numbers | **High** | 30 read-outs, `balanced` vs `max_accuracy`. Capture accuracy improves; `perceived_response_ms` does not regress by more than 300 ms. **Run 2026-09-24: BOTH CLAUSES FAIL. No accuracy improvement (`balanced` 45/45, `max_accuracy` 44/45); perceived response regresses by ~5.5 s, not 300 ms. A 900 ms mid-spelling pause defeats capture in BOTH modes, 28/28. See ADR-010 — the decision to change the table is the owner's** |
 | **A-14** | Semantic barge-in plus `interruption_delay` withstands backchannel | **High** | 20 backchannel events across three delay settings. Zero cut-offs at the chosen value; genuine interruptions still cut within 400 ms |
 | **A-15** | A correction during read-back is captured as a mismatch | **High** | 20 read-backs interrupted at the third character. `confirm_readback(matched:false)` in 20/20; **zero** wrong numbers recorded. **Run 2026-09-24 twice, 20 trials each: FIRST CLAUSE PASSES — `matched:false` in 20/20, every time, with the correction cutting in mid-number. SECOND CLAUSE FAILS — 18/20 carried the corrected value exactly; the two misses are one recognizer error, the spoken digit "four" transcribed as the word "for". BOTH of ADR-020's levers were then tested against it: `transcription_prompt` moved neither case, and digit words in `keyterms` made it worse — 0/20 exact, with the separator dropped from 16 of 20 corrected values. The baseline configuration is the one to keep. `results/a15-readback.json`, `-baseline.json`, `-prompt.json`, `-keyterms.json`** |
-| **A-16** | A redial after a drop produces no duplicate request | **Medium** | Drop the link after the number is given but before `record_outcome`; the second call does not resubmit |
+| **A-16** | A redial after a drop produces no duplicate request | **Medium** | Drop the link after the number is given but before `record_outcome`; the second call does not resubmit. **CLOSED 2026-09-24 (module 3.6), driven through the shipped Work Queue, tool handlers, effects, phase machine and real prompt files: the dropped call leaves the request open (INV-19 writes nothing while attempts remain), the redial is the same `requestId` at `attempts: 2` carrying `lastReference`, DISCLOSURE.txt renders "do not submit a new request until they confirm none exists" with the reference in it, and a third call's second `record_outcome` is refused — one write, one skip, both in the log. Writing the test found THREE guards in order, position then §8.5 then the queue, and it walks past the first two deliberately so it passes on the mechanism A-16 actually names** |
 | **A-17** | *(reserved — carrier stream limits, not applicable to this transport)* | — | Not run. Recorded so a carrier build knows it is open |
 | **A-18** | `interruption_delay` is accepted on this account | **Medium** | **CLOSED 2026-09-21.** `session.updated` observed. `ENABLE_INTERRUPTION_DELAY = true` in §13 |
 | **A-19** | A new persona after a transfer triggers fresh `HUMAN` detection | **Medium** | Transfer scenario present in the calibration set |

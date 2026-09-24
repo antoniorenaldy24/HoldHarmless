@@ -96,6 +96,14 @@ export function createWorkQueue(options: WorkQueueOptions): WorkQueue {
         return false;
       }
       request.attempts += 1;
+      // A request being dialled right now is not a request waiting to be
+      // dialled, and until module 3.6 nothing in the product ever said so:
+      // `in_progress` was a status §9.1 defines, panel 1 displays, and no code
+      // wrote. It belongs with `attempts`, which changes at the same moment and
+      // for the same reason, so both have one writer. No event: `call.started`
+      // already carries requestId and attempts, and routing this through
+      // updateStatus would put a non-outcome into the outcome log.
+      request.status = 'in_progress';
       return true;
     },
 

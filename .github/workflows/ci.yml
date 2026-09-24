@@ -45,6 +45,12 @@ jobs:
       - name: typecheck
         run: pnpm typecheck
 
+      # The dashboard has its own tsconfig and was checked by nothing until
+      # module 3.6 put a panel in it. Its settings are stricter than the root's
+      # (noUnusedLocals), and the first run found a dead import in callmodel.
+      - name: typecheck-dashboard
+        run: pnpm typecheck:dashboard
+
       # test:ci adds a reporter that turns each failing test into a public
       # annotation. Job logs need a token to read; annotations do not.
       - name: test
