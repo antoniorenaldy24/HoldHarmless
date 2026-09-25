@@ -19,6 +19,7 @@
     "a24": "tsx scripts/a24-capture-scale.ts",
     "a15": "tsx scripts/a15-readback-correction.ts",
     "mic-check": "tsx scripts/mic-check.ts",
+    "a27": "tsx scripts/a27-cue-cost.ts",
     "typecheck:dashboard": "tsc -p apps/dashboard/tsconfig.json",
     "build:dashboard": "pnpm --filter @holdharmless/dashboard build"
   },
