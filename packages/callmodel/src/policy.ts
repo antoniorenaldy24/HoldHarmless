@@ -181,7 +181,13 @@ export const POSITION_POLICY: Readonly<Partial<Record<PositionId, PositionPolicy
   'HUMAN/EXCHANGE': {
     interruptResponse: true,
     interruptionDelayMs: 700,
-    transcriptionMode: 'max_accuracy',
+    // `balanced`, not `max_accuracy`. ADR-010 was revised on 2026-09-25 after
+    // A-13 measured both of its clauses failing: no accuracy improvement
+    // (45/45 vs 44/45) and ~5.5 s of extra perceived response against a
+    // 300 ms bar. The mid-spelling split the original decision named is
+    // real and mode-independent (28/28 in both modes) — it is contained by
+    // §8.2's far-end sanity check, not by this parameter.
+    transcriptionMode: 'balanced',
     silenceTimeoutMs: 3000,
     silenceTimeoutBeforeDisclosureMs: 2500,
     rePromptLimit: 2,
@@ -194,7 +200,7 @@ export const POSITION_POLICY: Readonly<Partial<Record<PositionId, PositionPolicy
   'HUMAN/READBACK': {
     interruptResponse: true,
     interruptionDelayMs: 800,
-    transcriptionMode: 'max_accuracy',
+    transcriptionMode: 'balanced', // ADR-010 as revised; see HUMAN/EXCHANGE.
     silenceTimeoutMs: 3000,
     rePromptLimit: 2,
     afterLimit: { kind: 'phase', to: 'CLOSING', closingKind: 'escalation' },

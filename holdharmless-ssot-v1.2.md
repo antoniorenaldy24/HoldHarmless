@@ -289,16 +289,15 @@ The consequence is easy to miss: ADR-007's "seconds of speech already queued whe
 |---|---|---|
 | channel `IVR` | `min_latency` | Menus read quickly; latency beats accuracy |
 | channel `HOLD` or `TRANSFER` | `balanced` | The semantic layer needs patterns, not precision |
-| channel `HUMAN`, phase `EXCHANGE` or `READBACK` | **`max_accuracy`** | Authorization numbers, member IDs, dates of birth |
-| channel `HUMAN`, phase `CLOSING` | `balanced` | Ordinary conversation |
+| channel `HUMAN`, any phase | **`balanced`** | Measured: `max_accuracy` buys no accuracy here and costs ~5.5 s of perceived response (A-13, revised 2026-09-25) |
 
-**Rationale.** `transcription_mode` adjusts how long the model waits in silence before ending a turn, is mutable mid-session, and is explicitly recommended to shift to `max_accuracy` when capturing values that must not be wrong.
+So the mode now varies across two channels, not three: `min_latency` on `IVR`, `balanced` everywhere a human or a hold is on the line. `max_accuracy` remains in the type; no position selects it.
 
-**The failure it prevents.** A representative spells "A as in alpha, four, seven, two, dash, nine." On `balanced`, the model ends the turn at a natural pause mid-spelling and the agent replies before the number is complete. Read-back fails, attempts increment, the call escalates — for a transcription parameter never set, and `task_success_rate` drops for a reason visible on no panel.
+**Rationale.** `transcription_mode` adjusts how long the model waits in silence before ending a turn and is mutable mid-session. The original rationale — that the vendor recommends `max_accuracy` for values that must not be wrong — was a recommendation, not a measurement. A-13 measured it, and on this rig it does not hold.
 
-**Accepted trade-off.** `max_accuracy` applies from the first human turn, including the greeting, because phase does not subdivide the human conversation further (§5.2). A slightly longer endpoint during a fifteen-second greeting is a smaller cost than an extra phase with its own producer.
+**What the original decision was trying to prevent, and what actually answers it.** A representative spells "A as in alpha, four, seven, two, dash, nine" and pauses mid-spelling. The turn splits, the agent replies before the number is complete, read-back fails, attempts increment. That failure is real — A-13 reproduced it 28 times out of 28. What it is not is a transcription-mode problem: `max_accuracy` splits the turn at a 900 ms pause exactly as `balanced` does. What contains the harm is the layer above: the agent asks for the number again rather than recording half of one (§8.2's far-end sanity check), so the cost is a lost turn, not a wrong authorization number. That containment is where the guard belongs, and it is mode-independent.
 
-**Gated on A-13 — and the gate did not pass (measured 2026-09-24, module 3.5).** A-13 was written with two clauses, and both were tested on the same rendered numbers:
+**Gated on A-13 — the gate did not pass, and the decision changed (measured 2026-09-24, decided by the project owner 2026-09-25).** A-13 was written with two clauses, and both were tested on the same rendered numbers:
 
 | Clause | Bar | Measured |
 |---|---|---|
@@ -309,7 +308,9 @@ The consequence is easy to miss: ADR-007's "seconds of speech already queued whe
 
 **The failure this ADR claims to prevent was then tested directly, and `max_accuracy` does not prevent it.** A 900 ms pause was injected into the middle of the spoken number — a representative looking at their screen mid-spelling. Across 28 trials in two runs, capture failed in **all 28, in both modes**: the turn splits at the pause, and the agent asks for the number again ("I didn't catch the full number. Could you please repeat that?"). It does not record a half number, which is the harm §8.2 guards; it loses the turn. `max_accuracy` behaved exactly as `balanced` did. So the mid-spelling split is real, and `transcription_mode` is not the lever that answers it.
 
-**This is left as a decision, not taken.** The table above still says `max_accuracy`, and the evidence says it buys nothing measurable and costs about five seconds of perceived response. Changing it changes a decision record, so it belongs to the project owner, not to this measurement. `results/a24-capture.json`.
+**The decision, taken 2026-09-25 by the project owner: `balanced` on every `HUMAN` position.** The table above is the revised one. The reasoning recorded with it: what is given up is an accuracy improvement that was never observed, and what is bought back is about five and a half seconds per human turn against a 300 ms bar — on the number that panel 7 puts in front of a judge. The limitation stated above was put to the owner with the decision and accepted: the arms were separate sessions, so the direction of the latency result is firm and its exact magnitude is not.
+
+**What would reopen this.** A measurement on which `max_accuracy` captures something `balanced` misses. A-24 already shows where capture actually fails — ASR digit drops and mid-spelling splits — and neither is mode-sensitive, so the reopening evidence would have to be new in kind, not a rerun. `results/a24-capture.json`.
 
 ### ADR-011 — `interruption_delay` complements semantic barge-in
 
@@ -831,7 +832,7 @@ type ClosingKind = 'wrapup' | 'escalation';
 
 `EXCHANGE` covers everything from the greeting through gathering the authorization number. It is not subdivided, for one reason: a subdivision would need a producer, and there is no honest one. "The agent has finished introducing itself" is not an observable event — it is a judgment, and asking a tool to announce it adds a call the model must remember to make at a moment nothing forces.
 
-What the subdivision would have bought is handled elsewhere. Disclosure is tracked by `disclosedToCurrentParty` and driven by an observed phrase (§7.6), not by position. `transcription_mode: max_accuracy` simply applies from the first human turn (ADR-010).
+What the subdivision would have bought is handled elsewhere. Disclosure is tracked by `disclosedToCurrentParty` and driven by an observed phrase (§7.6), not by position. `transcription_mode` no longer varies within the human conversation at all: ADR-010 was revised to `balanced` on every `HUMAN` position, which removes the one parameter a subdivision could have carried.
 
 The rule generalizes: **a phase boundary must correspond to something a tool can truthfully report.** Boundaries that exist only in prose belong in prompts, not in the model.
 
@@ -933,8 +934,8 @@ Configuration is a function of `(channel, phase)`.
 | `IVR` | any working phase | `dtmf_only` / `open` | `false` | — | `min_latency` | `send_dtmf` |
 | `HOLD` | any working phase | **closed** | `false` | — | `balanced` | **none** |
 | `TRANSFER` | `EXCHANGE`, `READBACK`, `CLOSING` | closed | `false` | — | `balanced` | **none** |
-| `HUMAN` | `EXCHANGE` | open | `true` | **700 ms** | **`max_accuracy`** | `get_auth_request`, `capture_auth_number`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
-| `HUMAN` | `READBACK` | open | `true` | **800 ms** | **`max_accuracy`** | `confirm_readback`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
+| `HUMAN` | `EXCHANGE` | open | `true` | **700 ms** | **`balanced`** | `get_auth_request`, `capture_auth_number`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
+| `HUMAN` | `READBACK` | open | `true` | **800 ms** | **`balanced`** | `confirm_readback`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
 | `HUMAN` | `CLOSING` | open | `true` | — | `balanced` | `record_outcome`, `capture_reference`, `notify_transfer`, `escalate_to_human` |
 | `HUMAN`, `HOLD`, `IVR`, `TRANSFER` | `DONE` | derived | `false` | — | `balanced` | **none** — and no silence recovery |
 | `CLOSED` | `DONE` | closed | — | — | — | — |
@@ -2872,7 +2873,7 @@ A single symbol for both "checked and irrelevant" and "not yet examined" is what
 | **Phase timeout** | — | — | — | 480 s human time | 180 s | 120 s |
 | **`interrupt_response`** | `false` | `false` | `false` | `true` | `true` | `true` |
 | **`interruption_delay`** | — | — | — | 700 ms | 800 ms | — |
-| **`transcription_mode`** | `min_latency` | `balanced` | `balanced` | `max_accuracy` | `max_accuracy` | `balanced` |
+| **`transcription_mode`** | `min_latency` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
 | **Tools permitted** | 1 | — | — | 5 | 4 | 4 |
 | **Writes an outcome** | — | — | — | — | — | **yes** |
 | **`createReply` permitted** | yes, producing `dtmf` only (ADR-022, refined) | **no** — the gate is always closed (§6.7) | **no** — the gate is always closed (decided 2026-09-23) | yes | yes | yes |
@@ -3075,7 +3076,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 | **A-10** | Credit covers the project | **Medium** | Rolling average ≤ `budgetForDay(day)`; no session ever left unclosed |
 | **A-11** | The gate closes before the agent can speak when a hold begins | **Fatal** | 20 transitions with cue + 2 s pause + hold audio, plus 5 silent holds. **Zero milliseconds** of agent speech at the harness; `hold_entry_latency_ms` p90 < 800 ms. **Run 2026-09-23 at 6 + 2 transitions (the suite's count; the full 20 + 5 belongs in the rehearsal): zero audible milliseconds, p90 332 ms.** The latency is the ASR delta (300 ms simulated) plus the transport, so it is bounded by recognition, not by the gate |
 | **A-12** | Disclosure reaches every party on an announced transfer | **Fatal to ethical credibility** | 10 calls, two personas. `disclosuresDelivered ≥ parties_used` in **10 of 10** |
-| **A-13** | `max_accuracy` improves capture of spelled numbers | **High** | 30 read-outs, `balanced` vs `max_accuracy`. Capture accuracy improves; `perceived_response_ms` does not regress by more than 300 ms. **Run 2026-09-24: BOTH CLAUSES FAIL. No accuracy improvement (`balanced` 45/45, `max_accuracy` 44/45); perceived response regresses by ~5.5 s, not 300 ms. A 900 ms mid-spelling pause defeats capture in BOTH modes, 28/28. See ADR-010 — the decision to change the table is the owner's** |
+| **A-13** | `max_accuracy` improves capture of spelled numbers | **High** | 30 read-outs, `balanced` vs `max_accuracy`. Capture accuracy improves; `perceived_response_ms` does not regress by more than 300 ms. **Run 2026-09-24: BOTH CLAUSES FAIL. No accuracy improvement (`balanced` 45/45, `max_accuracy` 44/45); perceived response regresses by ~5.5 s, not 300 ms. A 900 ms mid-spelling pause defeats capture in BOTH modes, 28/28. Owner's decision 2026-09-25: the table changed — `balanced` on every `HUMAN` position (ADR-010). CLOSED** |
 | **A-14** | Semantic barge-in plus `interruption_delay` withstands backchannel | **High** | 20 backchannel events across three delay settings. Zero cut-offs at the chosen value; genuine interruptions still cut within 400 ms |
 | **A-15** | A correction during read-back is captured as a mismatch | **High** | 20 read-backs interrupted at the third character. `confirm_readback(matched:false)` in 20/20; **zero** wrong numbers recorded. **Run 2026-09-24 twice, 20 trials each: FIRST CLAUSE PASSES — `matched:false` in 20/20, every time, with the correction cutting in mid-number. SECOND CLAUSE FAILS — 18/20 carried the corrected value exactly; the two misses are one recognizer error, the spoken digit "four" transcribed as the word "for". BOTH of ADR-020's levers were then tested against it: `transcription_prompt` moved neither case, and digit words in `keyterms` made it worse — 0/20 exact, with the separator dropped from 16 of 20 corrected values. The baseline configuration is the one to keep. `results/a15-readback.json`, `-baseline.json`, `-prompt.json`, `-keyterms.json`** |
 | **A-16** | A redial after a drop produces no duplicate request | **Medium** | Drop the link after the number is given but before `record_outcome`; the second call does not resubmit. **CLOSED 2026-09-24 (module 3.6), driven through the shipped Work Queue, tool handlers, effects, phase machine and real prompt files: the dropped call leaves the request open (INV-19 writes nothing while attempts remain), the redial is the same `requestId` at `attempts: 2` carrying `lastReference`, DISCLOSURE.txt renders "do not submit a new request until they confirm none exists" with the reference in it, and a third call's second `record_outcome` is refused — one write, one skip, both in the log. Writing the test found THREE guards in order, position then §8.5 then the queue, and it walks past the first two deliberately so it passes on the mechanism A-16 actually names** |

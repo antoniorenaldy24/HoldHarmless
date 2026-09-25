@@ -222,11 +222,27 @@ describe('§5.6 values', () => {
     }
   });
 
-  test('max_accuracy exactly where numbers are exchanged — ADR-010', () => {
+  test('min_latency on the menus, balanced everywhere else — ADR-010 as revised', () => {
+    // The revision of 2026-09-25. ADR-010 used to put `max_accuracy` on
+    // HUMAN/EXCHANGE and HUMAN/READBACK; A-13 measured that buying no accuracy
+    // (45/45 vs 44/45) and costing ~5.5 s of perceived response against a
+    // 300 ms bar, and the owner took the decision to drop it. This pins the
+    // whole table rather than one row, so changing any position's mode fails
+    // here and has to be argued in the ADR.
+    //
+    // IVR/DONE is the exception that proves the rule: it is the awaiting-close
+    // policy, not a menu, so it reads `balanced` like every other DONE.
     for (const [id, p] of Object.entries(POSITION_POLICY)) {
-      const expected = id === 'HUMAN/EXCHANGE' || id === 'HUMAN/READBACK';
-      assert.equal(p!.transcriptionMode === 'max_accuracy', expected, id);
+      const expected = id.startsWith('IVR/') && id !== 'IVR/DONE' ? 'min_latency' : 'balanced';
+      assert.equal(p!.transcriptionMode, expected, id);
     }
+  });
+
+  test('no position asks for max_accuracy at all', () => {
+    // It stays in the type — the vendor offers it and a future measurement
+    // could earn it back — but nothing selects it today.
+    const modes = Object.values(POSITION_POLICY).map((p) => p!.transcriptionMode);
+    assert.equal(modes.includes('max_accuracy'), false);
   });
 
   test('no policy sets min_silence or max_silence — ADR-009', () => {
