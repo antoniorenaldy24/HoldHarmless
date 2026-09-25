@@ -172,6 +172,9 @@ importers:
       '@holdharmless/audio':
         specifier: workspace:*
         version: link:packages/audio
+      '@holdharmless/classifier':
+        specifier: workspace:*
+        version: link:packages/classifier
       '@holdharmless/core':
         specifier: workspace:*
         version: link:apps/core

@@ -15,8 +15,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AcousticObservation } from '@holdharmless/events';
 import { SAMPLE_RATE, muLaw } from '@holdharmless/audio';
-import { ASSET_DIR, MANIFEST, holdMusicPcm, lineFile, type LineId } from '@holdharmless/ivr-harness';
+import { ASSET_DIR, LINES, LINE_IDS, MANIFEST, holdMusicPcm, lineFile, type LineId } from '@holdharmless/ivr-harness';
 import {
+  ACOUSTIC_MARGIN,
   EMIT_INTERVAL_MS,
   createAcousticClassifier,
   voteAutocorrelation,
@@ -240,5 +241,55 @@ describe('against the rendered assets', () => {
       assert.equal(o.winner, 'SPEECH_LIKE', `${id} read as ${o.winner}`);
       assert.ok(os.every((x) => x.tier === 'provisional'), `${id} was confirmed as hold audio`);
     }
+  });
+
+  test('the margin is what stops a representative line muting the agent (module 4.1)', { skip: rendered ? false : 'assets not rendered (pnpm render-assets); CI has no TTS' }, () => {
+    // The test above looks only at the LAST observation of each line, which is
+    // why this went unseen: EVERY observation matters, because §6.5 sets
+    // `holdSuspected` on ONE provisional PERIODIC and the gate closes on it.
+    //
+    // Counted here across all 23 rendered rep1 lines, at observations taken
+    // while the frame contained speech. Without the margin the answer is 22 of
+    // 23 lines — the acoustic layer closing the gate on almost every
+    // representative turn. The assertion is a direction, not a fixed number:
+    // the margin must be a large improvement, and 9 is not zero, which is the
+    // part §6.7 leaves to the owner (see ACOUSTIC_MARGIN and votePauseRatio).
+    const count = (margin: number): number => {
+      let lines = 0;
+      for (const id of LINE_IDS.filter((x) => LINES[x].role === 'rep1')) {
+        const pcm = load(id);
+        const c = createAcousticClassifier({ margin });
+        let hit = false;
+        for (let i = 0; i + 160 <= pcm.length; i += 160) {
+          const frame = pcm.subarray(i, i + 160);
+          let sum = 0;
+          for (const v of frame) sum += v * v;
+          const o = c.push(frame, (i / 160) * 20);
+          if (o?.winner === 'PERIODIC' && Math.sqrt(sum / frame.length) >= 250) hit = true;
+        }
+        if (hit) lines++;
+      }
+      return lines;
+    };
+    const without = count(0);
+    const with_ = count(ACOUSTIC_MARGIN);
+    assert.ok(without >= 20, `without the margin only ${without} lines misfire; the defect this guards is gone or the audio changed`);
+    assert.ok(with_ <= without / 2, `${with_} of 23 lines still misfire against ${without} without the margin`);
+  });
+
+  test('the margin is the largest one that keeps the provisional tier under 1.5 s', { skip: rendered ? false : 'assets not rendered; the sweep needs them' }, () => {
+    // ACOUSTIC_MARGIN is chosen as the last value on the free part of the curve.
+    // If a later edit raises it, hold detection slows past §21 2.1 and that has
+    // to be an argued decision, not a tidy-up that made it match the semantic
+    // layer's 0.15. One step up is enough to prove the edge is real.
+    const onset = (margin: number): number => {
+      const c = createAcousticClassifier({ margin });
+      feed(c, syntheticSpeech(30), 30);
+      const after = feed(c, MUSIC, 4, { startMs: 30_000 });
+      const i = after.findIndex((o) => o.winner === 'PERIODIC');
+      return i < 0 ? Infinity : (i + 1) * EMIT_INTERVAL_MS;
+    };
+    assert.ok(onset(ACOUSTIC_MARGIN) <= 1500, `at ${ACOUSTIC_MARGIN} the provisional tier takes ${onset(ACOUSTIC_MARGIN)} ms`);
+    assert.ok(onset(ACOUSTIC_MARGIN + 0.01) > 1500, 'the chosen margin is no longer at the edge of the free range — re-sweep it');
   });
 });

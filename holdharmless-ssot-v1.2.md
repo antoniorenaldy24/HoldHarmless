@@ -714,6 +714,13 @@ The round trip to the API is a declared parameter, measured by E3 on the demo ho
 
 **`perceived_response_ms`** — from when the harness stops playing the representative's line to when agent audio is audible at the harness.
 
+**Built in module 4.1, and one word of the sentence above had to be read rather than obeyed.** "Stops playing" read literally is the end of the asset **file**, trailing silence included, which would put a few hundred milliseconds of edge-tts padding inside a figure measured against a 300 ms bar — and would have no analogue at all in `HUMAN_REP`, where there is no file. So it is implemented as A-13 words it, **"end of the representative's audio": the last AUDIBLE frame the harness sent.** One rule serves both modes, and what then differs between them is the microphone path alone, which is the difference §10.6 wants isolated.
+
+Two further properties, each of which was a mutation that had to be killed:
+
+- **A menu prompt does not start the clock.** After a prompt the agent replies with DTMF, and DTMF is not what this number is about. Only a representative's line arms it, and hold music or another line disarms it — the wait ended when the far end acted, not when the agent did.
+- **In `HUMAN_REP` the zero point is the last frame with SPEECH in it, not the moment the endpointer agreed there had been silence.** Taking the endpointer's verdict deducts the whole `TURN_END_SILENCE_MS` window from every figure — measured at 603 ms against a correct 1329 ms on the same turn. That error is in the **flattering** direction, which is the worse one: it could turn a figure that fails into one that passes, on the number panel 7 puts in front of a judge.
+
 | Additional component | Estimate |
 |---|---|
 | Endpointing (governed by `transcription_mode`) | 300–800 ms |
@@ -1084,6 +1091,10 @@ Phrases marked `yes` set `holdSuspected` **and** cue the model to call `notify_t
 
 Every signal carries `lastUpdated` and `maxStaleness`. Stale signals are excluded and remaining weights renormalized. If surviving weight falls below the effective `MIN_WEIGHT`, the result is `UNKNOWN` rather than a guess.
 
+**Two bars, on BOTH layers (corrected in module 4.1).** A result must also lead the runner-up by a margin, or it is `UNKNOWN`. §6.2 stated this for the semantic layer from module 2.2 and gave the reason — "one bar would report a 0.46/0.45 split as a decision" — and the acoustic layer was built with one bar, which this section's wording permitted. It did worse than the example: 240 ms into a representative's line only `rms` has filled its window, `voteRms` splits its weight 0.50/0.50 between `PERIODIC` and `SPEECH_LIKE` because loudness cannot tell them apart, and the tie was reported as an accepted `PERIODIC` — toward `PERIODIC`, because that is the order the classes are declared in. §6.5 sets `holdSuspected` on **one** provisional `PERIODIC`, so the gate closed and the agent went mute while the far end was still speaking. Measured across the 23 rendered representative lines: **22 of 23 lines**, 42 observations.
+
+The acoustic layer's margin is `ACOUSTIC_MARGIN` (**0.05**), not the semantic layer's `CLASSIFIER_MARGIN` (0.15), and the difference is measured rather than incidental — see §6.7, which is where the rest of this finding lives.
+
 Every observation carries `signalsAvailable` and `windowsMs`. Without both, a confusion matrix cannot be interpreted.
 
 ### 6.5 Hysteresis
@@ -1112,6 +1123,8 @@ Every observation carries `signalsAvailable` and `windowsMs`. Without both, a co
 
 **What calibration can and cannot prove.** In `BOT_REP` mode the IVR and the representative are both rendered speech, so the classifier learns to separate rendered speech from rendered speech. That is healthy — it forces reliance on conversational structure. The risk runs the other way: `HUMAN_REP` on stage is a live person whose acoustics are absent from the calibration set. Hence genuine human turns in week 2, not week 4.
 
+**The script for it is written: `docs/recording-script.md`** (module 4.1). Eighty-six takes, mapped onto the harness's own `LineId`s so each recording has a rendered counterpart speaking the identical sentence — the cleanest comparison available between a human voice and a synthetic one. It also says which of the seven categories each block closes, and that the seventh needs nothing recorded because `ROLE_VOICES` already satisfies it.
+
 **Consent.** Fixtures contain real voices. Obtain consent and keep fixture data — `packages/fixtures/data/` — outside any public repository. (v1.3: the recorder and player code is tracked; it holds no voice, and code kept out of the repository is code CI never runs. A test fails if anything under `packages/fixtures` other than code is tracked, or if `data/` stops being ignored.)
 
 ### 6.7 Hold-exit detection: one lever, two opposing criteria
@@ -1127,11 +1140,34 @@ Every observation carries `signalsAvailable` and `windowsMs`. Without both, a co
 
 **A metric that shows both criteria failing together.** `hold_exit_unknown_duration_ms` measures how long the semantic layer returned `UNKNOWN` while the far end was speaking.
 
+**A second instance of the same shape, found in module 4.1, and the part of it that is still open.** The lever is the acoustic layer's decision margin (§6.4); the opposing criteria are false gate closure during speech and the provisional tier's 1.5 s requirement (§21 2.1). Swept against the classifier tests' own audio, and against the three class verdicts those tests already assert:
+
+| `ACOUSTIC_MARGIN` | lines that mute the agent | hold onset | speech over music |
+|---|---|---|---|
+| 0.00 | **22 of 23**, 42 observations | 1250 ms | `PERIODIC` |
+| 0.02 | 10 of 23, 20 obs | 1250 ms | `PERIODIC` |
+| 0.04 | 9 of 23, 15 obs | 1250 ms | `PERIODIC` |
+| **0.05** | **9 of 23, 15 obs** | **1250 ms** | `PERIODIC` |
+| 0.06 | 9 of 23, 15 obs | **1750 ms** | `PERIODIC` |
+| 0.10 | 8 of 23, 13 obs | 2000 ms | `UNKNOWN` |
+| 0.15 | 6 of 23, 11 obs | 2000 ms | `UNKNOWN` |
+| 0.20 | 5 of 23, 10 obs | 2000 ms | `UNKNOWN` |
+
+**0.05 is taken, and it is not a decision.** It is the largest value that costs nothing: every value up to it cuts false closures with hold onset unchanged and every documented class verdict intact. 0.06 is where the trade starts.
+
+**9 of 23 is not zero, and closing that gap IS a decision.** The remaining closures come from one signal: over the 2 s window this classifier reads, pause ratio measures 0.060 to 0.73 on speech (median 0.340) and exactly 0.000 on hold music, so the two never overlap — but `votePauseRatio`'s ramp (0.10 to 0.30) sits **inside** the speech population, because §6.1's recorded 0.40–0.46 for speech is a whole-clip average and this classifier never sees a whole clip. Moving the ramp into the empty gap (0.01–0.05) takes the nine to zero and pushes hold onset past 1.5 s. Per this section's own rule the operating point is the project owner's, so both numbers are recorded and neither is taken.
+
+§6.7's way out was tried and failed: requiring **two** signals to vote `PERIODIC`, rather than letting one carry a weighted majority, gives 9 of 23 and 1250 ms — exactly what the margin alone already gives. It is not offered as an answer.
+
+**All of it is measured on rendered audio.** `pnpm mic-check --file` re-runs every figure above on a human voice, which is what §6.6's recordings are for.
+
 ### 6.8 Known unresolved risk
 
 Giving the semantic layer transcript deltas during `HOLD` improves detection latency, but partial transcripts over hold music are where hallucinated text appears. This could increase false exits rather than reduce them.
 
 Until A-7 resolves it: the semantic layer runs during `HOLD` at elevated `MIN_WEIGHT` with N=2, and every hold exit records the `sourceDelta` that triggered it.
+
+**Second risk, recorded in module 4.1: nothing feeds the acoustic layer yet.** `createAcousticClassifier` has no production caller — only tests and `scripts/mic-check.ts`. Whatever wires it into the receive path must push **silence on the line as silence frames**, not as an absence of frames. `createSignalWindows` keeps its window by timestamp, so a gap in feeding is not a pause: it is fewer samples over which the same ratio is computed. A feed that goes quiet when the far end goes quiet would starve the pause-ratio signal of the one thing that defines it, and every figure in §6.7's table would be measuring something else.
 
 ---
 
@@ -2059,7 +2095,7 @@ The harness knows things the core cannot. It reports them over a **separate cont
 | `agent_speech_during_hold_ms` | It runs a speech detector on its own inbound audio during its own hold segments |
 | `hold_entry_latency_ms` | It spoke the hold-cue phrase, so it owns the zero point |
 | `dtmf_decode_first_try` | It is the decoder |
-| `perceived_response_ms` | It knows when it stopped playing the representative's line |
+| `perceived_response_ms` | It knows when the representative's audio ended, and hears the agent's first audible frame (built in module 4.1; §7 records how "stops playing" is read) |
 | `parties_used` | It knows how many personas it used (ADR-018) |
 | `fields_requested` | Its script drove the request |
 
@@ -2112,6 +2148,17 @@ A team member's voice is captured from the local microphone, encoded to μ-law 8
 This is simpler than any carrier equivalent — no bridging, no second call leg — which is why genuine human turns land in the calibration set in week 2 rather than week 4 (§6.6).
 
 **Two constraints.** The microphone path adds its own capture latency, so `HUMAN_REP` figures are reported separately from `BOT_REP` figures. And `HUMAN_REP` runs on the local host (ADR-003).
+
+**As built in module 4.1** — `apps/ivr-harness/src/microphone.ts`. Four sentences of specification leave four decisions, and each is recorded where it is made:
+
+- **Capture is ffmpeg, not a native addon.** ffmpeg is already required (§10.2 renders every asset with it) and emits exactly this format, so the path adds no dependency and no build step on the one platform the demo host runs. `MIC_DEVICE` (§13) names the device in the form the platform's ffmpeg input expects; there is no default, because guessing would record from whichever device happened to be first.
+- **`streamMicrophone` resolves at the end of ONE TURN.** §12.10 declares it and says nothing about when it resolves. A turn ends after `TURN_END_SILENCE_MS` of quiet, so a `HUMAN_REP` turn substitutes for a `speakAs` turn in every scenario §10.5 describes without the scenario knowing which mode it is in.
+- **The device is opened once per session, not once per turn.** Opening costs hundreds of milliseconds and a turn that began while the device was still opening would lose its first word. Startup is reported once, as `mic_startup_latency_ms`; it is not in the per-turn path at all.
+- **Frames before onset are dropped.** The stream is open across the whole call, so what precedes a turn is the room, and forwarding it would run the agent's silence-recovery timers (§5.7) against noise the representative never made.
+
+**What the path can and cannot measure.** It measures everything after the first byte reaches the process: `mic_frame_delay_ms` is each frame's lateness against the real-time cadence the first frame established, which is what a pipe stall or a GC pause looks like and what actually breaks live audio. It does **not** measure the acoustic path — microphone, driver, and the device's own buffering before ffmpeg sees anything — which needs a loopback reference and is not attempted. So `HUMAN_REP` capture latency is reported as a **lower bound**, and this section's rule that the two modes are never pooled is what keeps an unmeasured offset out of a `BOT_REP` figure. Every session reports `rep_mode`, and every `perceived_response_ms` figure carries its mode, so pooling them is not something prose has to ask an analyst not to do.
+
+**No loudness normalization on the live path.** §10.2 normalizes every rendered asset; ffmpeg's single-pass `loudnorm` carries about three seconds of lookahead, which on a live path would dwarf everything measured here. The consequence — live capture is not level-matched to the assets — is handled by measuring the level (`mic_level_rms`) rather than by filtering.
 
 ### 10.7 Difficulty configuration
 
@@ -2604,6 +2651,8 @@ export interface HarnessSession {
 
 `speakAs` takes a line identifier rather than text, because the audio is pre-rendered (§10.2). That is enforced by type, so nobody accidentally introduces a runtime TTS call.
 
+`streamMicrophone` resolves at the end of **one turn** (decided in module 4.1, §10.6) — the same contract `speakAs` has, so a scenario cannot tell which mode it is running in. It refuses persona 0: the IVR is a recording by definition (§10.2), and a live voice reading menu prompts would put a human turn into the fixture set labelled as an IVR prompt, which is the one confusion the classifier is calibrated against.
+
 **As built in v1.3 (module 1.10, the week-1 skeleton).**
 
 - **Personas are numbered 0 (the IVR), 1 and 2**, and `speakAs(persona, lineId)` refuses a line rendered in another role's voice. Otherwise the harness's party count (ADR-018) could disagree with what was audible.
@@ -2620,6 +2669,8 @@ export interface HarnessSession {
 |---|---|---|
 | `NETWORK_PROFILE` | `TELEPHONY` | All measurements use this. `CLEAN` is for unit tests only |
 | `IVR_NAV_MODE` | **`dtmf`** | **Set by E1 (2026-09-22): 100/50 ms decodes 20/20 in every trial under `TELEPHONY` and `DEGRADED`.** `speech` stays the built fallback; its recognizer is undecided (§12.10) |
+| `REP_MODE` | `BOT_REP` | `HUMAN_REP` streams the live microphone in place of rendered representative lines (§10.6). Reported as telemetry on every session, so no latency figure is mode-less |
+| `MIC_DEVICE` | — | Required when `REP_MODE=HUMAN_REP`. The capture device in the form the platform's ffmpeg input expects: a dshow name on Windows, an avfoundation index on macOS, an ALSA name on Linux. No default — guessing would record from whichever device happened to be first |
 | `AUDIO_ENCODING` | `audio/pcmu` | **E2 passed.** Accepted on both `input.format` and `output.format` at 8000 Hz; the 24 kHz path stays unbuilt |
 | `AUDIO_SAMPLE_RATE` | `8000` | Confirmed by E0 and E2 |
 | `ENABLE_INTERRUPTION_DELAY` | **`true`** | **E0 passed** — `turn_detection.interruption_delay` accepted (A-18) |
@@ -2635,7 +2686,11 @@ export interface HarnessSession {
 | `MIN_INTERDIGIT_SILENCE_MS` | `40` | How long the line must be quiet before the decoder accepts the SAME digit again (ADR-013's third limit). Below `DTMF_GAP_MS`, so a generated repeat is heard; above one frame, so a 20 ms underflow hole inside a tone is not mistaken for a second keypress. It is also Q.24's pause. Changing it moves A-1's lowest passing timing |
 | `HOLD_CONFIRM_MS` | `3000` | From `HOLD_CUE` to the channel transition |
 | `SEMANTIC_N` | `2` | |
-| `CLASSIFIER_MARGIN` | `0.15` | |
+| `CLASSIFIER_MARGIN` | `0.15` | The **semantic** layer's margin. The acoustic layer has its own; see below |
+| `TURN_END_SILENCE_MS` | `700` | How much quiet ends a `HUMAN_REP` turn (§10.6). Below a natural mid-sentence pause |
+| `TURN_MAX_MS` | `60000` | A `HUMAN_REP` turn cannot run forever. §10.5's longest representative line is under 30 s |
+| `TURN_ONSET_TIMEOUT_MS` | `20000` | How long a `HUMAN_REP` turn waits for the speaker to begin before reporting `human_rep_turn_missing`. A muted microphone must not read as a slow agent |
+| `ACOUSTIC_MARGIN` | **`0.05`** | **Added in module 4.1**, when the acoustic layer was found to have no margin at all: a 0.50/0.50 tie was reported as an accepted `PERIODIC` and muted the agent on 22 of 23 rendered representative lines. 0.05 is the largest value that costs nothing against the 1.5 s provisional tier (§6.7 has the sweep) |
 | `MIN_WEIGHT` | tuned per §6.7 | Lowest value giving zero false hold exits |
 | `MIN_WEIGHT_FLOOR` | `= MIN_WEIGHT` baseline | The ramp never goes below it |
 | `HOLD_RAMP_MAX_STEPS` | `3` | Then nothing further; only `HOLD_TIMEOUT_MS` ends the hold (§6.7) |
@@ -3052,7 +3107,7 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 
 | # | Module | Acceptance criteria |
 |---|---|---|
-| 4.1 | `HUMAN_REP` mode | Live microphone path working; classifier holds its calibration figures; latency reported separately |
+| 4.1 | `HUMAN_REP` mode | Live microphone path working; classifier holds its calibration figures; latency reported separately. **Built 2026-09-25 in `apps/ivr-harness/src/microphone.ts`. Criteria 1 and 3 met: `streamMicrophone` streams one endpointed turn from an ffmpeg capture device, and `perceived_response_ms` now HAS a producer — it was consumed by panel 7 and written by nothing — reported with `rep_mode` on every figure so the two modes cannot be pooled. Twelve mutations, twelve killed; the one that survived the first pass was the latency zero point, the subtlest thing in the module. Criterion 2 is NOT met and the reason is a finding, not a delay: the measurement built to answer it (`scripts/mic-check.ts`) showed the acoustic layer closing the gate on 22 of 23 rendered representative lines, because it had no decision margin at all (§6.4). `ACOUSTIC_MARGIN` takes that to 9 of 23 at no cost; the remaining 9 is an operating-point decision recorded in §6.7 for the owner, and every figure in it is rendered audio until §6.6's recordings exist (`docs/recording-script.md`)** |
 | 4.2 | Backchannel and mute cost | **A-14 passes**; **A-27 passes** |
 | 4.3 | Minimum necessary | **A-31 passes** |
 | 4.4 | Robustness | One full run under `DEGRADED`; **A-32 passes** |

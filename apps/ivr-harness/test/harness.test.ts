@@ -573,7 +573,10 @@ describe('the harness over the loopback transport', () => {
     const s = h.sessions.get('SYN-CALL-persona')!;
     await assert.rejects(s.speakAs(1, 'ivr_main_menu'), /is a ivr line; persona 1 is rep1/);
     await assert.rejects(s.speakAs(2, 'rep1_greeting'), /is a rep1 line; persona 2 is rep2/);
-    await assert.rejects(s.streamMicrophone(1), /not built yet/);
+    // Was `/not built yet/` until module 4.1 built it. The refusal that stands
+    // is the mode one, and it lives with the rest of HUMAN_REP in
+    // microphone.test.ts — this line only records that the stub is gone.
+    await assert.rejects(s.streamMicrophone(1), /requires repMode HUMAN_REP/);
     await c.close();
   });
 });

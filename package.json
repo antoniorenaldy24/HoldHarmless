@@ -18,6 +18,7 @@
     "test:ci": "node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/gh-annotations.mjs --test-reporter-destination=stdout packages/*/test/*.test.ts apps/ivr-harness/test/*.test.ts apps/core/test/*.test.ts",
     "a24": "tsx scripts/a24-capture-scale.ts",
     "a15": "tsx scripts/a15-readback-correction.ts",
+    "mic-check": "tsx scripts/mic-check.ts",
     "typecheck:dashboard": "tsc -p apps/dashboard/tsconfig.json",
     "build:dashboard": "pnpm --filter @holdharmless/dashboard build"
   },
@@ -34,7 +35,8 @@
     "@types/ws": "^8.5.13",
     "@holdharmless/agent": "workspace:*",
     "@holdharmless/events": "workspace:*",
-    "@holdharmless/core": "workspace:*"
+    "@holdharmless/core": "workspace:*",
+    "@holdharmless/classifier": "workspace:*"
   },
   "packageManager": "pnpm@12.5.1"
 }
