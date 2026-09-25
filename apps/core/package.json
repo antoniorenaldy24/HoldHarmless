@@ -3,15 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Orchestrator, call model host, tool handlers, work queue (SSOT §12.9).",
-  "exports": { ".": "./src/index.ts" },
+  "description": "Orchestrator, call model host, tool handlers, work queue (SSOT \u00a712.9).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./view": "./src/dashboard-view.ts"
+  },
   "dependencies": {
     "@holdharmless/agent": "workspace:*",
     "@holdharmless/callmodel": "workspace:*",
     "@holdharmless/classifier": "workspace:*",
     "@holdharmless/events": "workspace:*",
+    "@holdharmless/invariants": "workspace:*",
     "@holdharmless/prompts": "workspace:*",
     "@holdharmless/transport": "workspace:*",
     "@holdharmless/transport-loopback": "workspace:*"
+  },
+  "scripts": {
+    "dev": "tsx src/dev.ts"
   }
 }

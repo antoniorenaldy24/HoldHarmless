@@ -36,6 +36,10 @@ import {
 } from '@holdharmless/callmodel';
 import { gateAdmits, gateTransitionRequiresClear } from '@holdharmless/transport';
 import { syntheticViolations } from './synthetic.js';
+import { replay, type ReplayState } from './replay.js';
+
+export { replay };
+export type { ReplayState };
 
 export interface InvariantContext {
   call: Readonly<Call>;
@@ -57,76 +61,6 @@ export interface Invariant {
 
 /** §13 — kept here rather than imported from a config module that does not exist yet. */
 export const PARTY_CONTINUITY_MS = 5000;
-
-// ---------------------------------------------------------------------------
-// Replay: the state implied by the log at each event.
-// ---------------------------------------------------------------------------
-
-export type ReplayState = {
-  index: number;
-  event: CallEvent;
-  /** State BEFORE this event is applied. */
-  channel: Channel;
-  phase: Phase;
-  gate: GateIntent;
-  holdSuspected: boolean;
-  /**
-   * When the current hold SEGMENT began — the zero point for holdDurationMs
-   * (ADR-017). Distinct from holdSuspected: suspicion clears when HOLD is
-   * confirmed, but the segment runs until a person or a menu answers.
-   */
-  holdSegmentStartMs: number | null;
-  profile: NetworkProfileName | null;
-};
-
-export function replay(log: readonly CallEvent[]): ReplayState[] {
-  let channel: Channel = 'DIALING';
-  let phase: Phase = 'NOT_STARTED';
-  // Matches the transport's fail-safe default: nothing is heard until the Call
-  // Model derives an open gate.
-  let gate: GateIntent = 'closed';
-  let holdSuspected = false;
-  let holdSegmentStartMs: number | null = null;
-  let profile: NetworkProfileName | null = null;
-
-  const out: ReplayState[] = [];
-  log.forEach((event, index) => {
-    out.push({ index, event, channel, phase, gate, holdSuspected, holdSegmentStartMs, profile });
-    switch (event.t) {
-      case 'call.started':
-        profile = event.networkProfile as NetworkProfileName;
-        break;
-      case 'network.profile_changed':
-        profile = event.to;
-        break;
-      case 'channel.changed':
-        channel = event.to;
-        // A person or a menu answering ends the hold segment.
-        if (event.to === 'HUMAN' || event.to === 'IVR') holdSegmentStartMs = null;
-        break;
-      case 'phase.changed':
-        phase = event.to;
-        break;
-      case 'gate.changed':
-        // Deliberately does NOT update holdSuspected. That flag has one source in
-        // the log — hold.suspected / hold.cleared — and INV-1 checks each
-        // gate.changed against it, rather than letting the audited event define
-        // the input it is audited against.
-        gate = event.to;
-        break;
-      case 'hold.suspected':
-        holdSuspected = true;
-        holdSegmentStartMs ??= event.atMs;
-        break;
-      case 'hold.cleared':
-        holdSuspected = false;
-        break;
-      default:
-        break;
-    }
-  });
-  return out;
-}
 
 const ms = (iso: string) => Date.parse(iso);
 

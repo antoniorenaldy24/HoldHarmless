@@ -51,6 +51,19 @@ let active: { release: () => void } | null = null;
  */
 let held: { winmm: unknown; begin: (p: number) => number; end: (p: number) => number } | null = null;
 
+/**
+ * Whether the library reference above is still alive.
+ *
+ * It exists so `held` is READ somewhere and not only written. A stricter
+ * compiler (the dashboard's, which now reaches this file through the core)
+ * reports a write-only variable as unused, and the obvious response — deleting
+ * it — is exactly the change that silently costs 1 ms timer resolution again.
+ * A test can now assert the reference outlives the call that made it.
+ */
+export function timerLibraryHeld(): boolean {
+  return held !== null;
+}
+
 export function raiseTimerResolution(): TimerResolution {
   if (process.platform !== 'win32') {
     return { raised: false, platform: process.platform, detail: 'not required on this platform' };

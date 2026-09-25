@@ -20,7 +20,7 @@
  * for a call back; hiding it would make the screen agree with the bug.
  */
 
-import type { EscalationCard } from '@holdharmless/core';
+import type { EscalationCard } from '@holdharmless/core/view';
 
 export type EscalationTasksProps = {
   cards: readonly EscalationCard[];

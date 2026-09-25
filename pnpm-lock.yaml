@@ -220,6 +220,9 @@ importers:
       '@holdharmless/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@holdharmless/invariants':
+        specifier: workspace:*
+        version: link:../../packages/invariants
       '@holdharmless/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts

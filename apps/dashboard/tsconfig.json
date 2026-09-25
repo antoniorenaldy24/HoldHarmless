@@ -11,7 +11,12 @@
     "noFallthroughCasesInSwitch": true,
     "isolatedModules": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // "node" is here for TYPE resolution only. The browser graph imports no value
+    // from a Node-only module — `@holdharmless/core/view` exists to guarantee
+    // that — but tsc still walks files the packages expose, and some of them
+    // touch node:fs. `pnpm build:dashboard` is what proves the bundle is clean.
+    "types": ["vite/client", "node"]
   },
   "include": ["src"]
 }

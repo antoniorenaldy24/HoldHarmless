@@ -258,6 +258,13 @@ export type CallEventBody =
   | {
       t: 'hold.suspected';
       trigger: 'hold_cue' | 'periodic_provisional' | 'notify_transfer' | 'reconnect';
+      /**
+       * EPOCH milliseconds, not an offset into the call. It is the zero point
+       * for the hold SEGMENT (ADR-017), which `replay` carries forward and the
+       * dashboard subtracts from — writing an offset here produced a hold
+       * segment of fifty-six years on panel 2 the first time one was written by
+       * hand. The unit now says so.
+       */
       atMs: number;
     }
   | {

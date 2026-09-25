@@ -7,3 +7,7 @@ export * from './readback.js';
 export * from './effects.js';
 export * from './escalation-tasks.js';
 export * from './silence-recovery.js';
+export * from './log.js';
+export * from './dashboard-view.js';
+export * from './server.js';
+export * from './demo-call.js';

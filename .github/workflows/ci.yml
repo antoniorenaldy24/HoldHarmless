@@ -51,6 +51,13 @@ jobs:
       - name: typecheck-dashboard
         run: pnpm typecheck:dashboard
 
+      # The bundle is what proves the dashboard's import graph is browser-safe.
+      # The core holds a Node HTTP server and the events package writes files;
+      # `@holdharmless/core/view` exists so neither reaches the browser, and a
+      # typecheck alone would not notice if one started to.
+      - name: build-dashboard
+        run: pnpm build:dashboard
+
       # test:ci adds a reporter that turns each failing test into a public
       # annotation. Job logs need a token to read; annotations do not.
       - name: test

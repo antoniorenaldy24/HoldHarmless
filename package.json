@@ -14,11 +14,12 @@
     "render-assets": "tsx scripts/render-assets.ts",
     "e1": "tsx scripts/e1-dtmf-reach.ts",
     "harness": "pnpm --filter @holdharmless/ivr-harness start",
-    "check": "pnpm typecheck && pnpm typecheck:dashboard && pnpm test && pnpm check:invariants && pnpm check:doc",
+    "check": "pnpm typecheck && pnpm typecheck:dashboard && pnpm build:dashboard && pnpm test && pnpm check:invariants && pnpm check:doc",
     "test:ci": "node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/gh-annotations.mjs --test-reporter-destination=stdout packages/*/test/*.test.ts apps/ivr-harness/test/*.test.ts apps/core/test/*.test.ts",
     "a24": "tsx scripts/a24-capture-scale.ts",
     "a15": "tsx scripts/a15-readback-correction.ts",
-    "typecheck:dashboard": "tsc -p apps/dashboard/tsconfig.json"
+    "typecheck:dashboard": "tsc -p apps/dashboard/tsconfig.json",
+    "build:dashboard": "pnpm --filter @holdharmless/dashboard build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
