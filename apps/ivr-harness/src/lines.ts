@@ -33,7 +33,26 @@ export const ROLE_VOICES: Readonly<Record<Role, { voice: string; rate: string }>
   rep2: { voice: 'en-GB-SoniaNeural', rate: '-15%' },
 };
 
-type LineSpec = { role: Role; text: string; purpose: string };
+type LineSpec = {
+  role: Role;
+  text: string;
+  purpose: string;
+  /**
+   * The harness's OWN ground truth: this line contains a phrase a representative
+   * would use to announce a hold.
+   *
+   * Deliberately declared here rather than derived from §6.3's `HOLD_CUE_PHRASES`.
+   * §16.1: a metric measuring whether a mechanism works must not be measured by
+   * that mechanism. If the harness asked the classifier's own list what it had
+   * just said, `agent_mute_during_conversation_ms` and A-27 would agree with the
+   * list by construction, and a phrase the list misses would be invisible.
+   *
+   * A disagreement between this column and §6.3 is therefore a FINDING, not a
+   * bug in either: it is a cue the system does not know, or a non-cue it fires
+   * on. `apps/ivr-harness/test/microphone.test.ts` prints the comparison.
+   */
+  holdCue?: boolean;
+};
 
 export const LINES = {
   // --- IVR: a three-level menu, verbose (the option is named before its digit) ---
@@ -79,8 +98,8 @@ export const LINES = {
   rep1_ask_clinical: { role: 'rep1', purpose: 'field request', text: 'Can you give me the clinical reason for the request?' },
   rep1_repeat_member_id: { role: 'rep1', purpose: 'repeat request', text: 'Sorry, can you repeat the member ID?' },
   rep1_backchannel: { role: 'rep1', purpose: 'backchannel while digits are read', text: 'Mm-hmm.' },
-  rep1_hold_cue: { role: 'rep1', purpose: 'hold announcement phrase (A-11)', text: 'One moment please, let me look that up.' },
-  rep1_cue_no_hold: { role: 'rep1', purpose: 'cue phrase without a hold (A-27)', text: 'Let me check that for you. Okay, I see it right here.' },
+  rep1_hold_cue: { role: 'rep1', purpose: 'hold announcement phrase (A-11)', text: 'One moment please, let me look that up.', holdCue: true },
+  rep1_cue_no_hold: { role: 'rep1', purpose: 'cue phrase without a hold (A-27)', text: 'Let me check that for you. Okay, I see it right here.', holdCue: true },
   rep1_clinical_question: { role: 'rep1', purpose: 'clinical question -> escalation', text: 'Was conservative therapy tried for at least six weeks before this request?' },
   rep1_approved: {
     role: 'rep1',
@@ -92,8 +111,8 @@ export const LINES = {
   rep1_reference: { role: 'rep1', purpose: 'call reference', text: 'Your call reference number is R, as in Romeo, one, four, two, zero, nine.' },
   rep1_denied_boilerplate: { role: 'rep1', purpose: 'boilerplate denial (§8.5.1)', text: "That request is denied. It's not medically necessary." },
   rep1_pending_info: { role: 'rep1', purpose: 'document request -> pending_info', text: "We'll need the clinical notes faxed over before we can make a determination." },
-  rep1_transfer: { role: 'rep1', purpose: 'department transfer (A-12)', text: "I'm going to transfer you to utilization management. Please hold." },
-  rep1_hold_during_closing: { role: 'rep1', purpose: 'hold during closing (A-21)', text: 'Oh, hold on, let me get that for you.' },
+  rep1_transfer: { role: 'rep1', purpose: 'department transfer (A-12)', text: "I'm going to transfer you to utilization management. Please hold.", holdCue: true },
+  rep1_hold_during_closing: { role: 'rep1', purpose: 'hold during closing (A-21)', text: 'Oh, hold on, let me get that for you.', holdCue: true },
   rep1_one_more_thing: { role: 'rep1', purpose: 'late addition during closing', text: 'Oh wait, one more thing before you go.' },
   rep1_goodbye: { role: 'rep1', purpose: 'closing', text: "You're welcome. Have a good day." },
 
@@ -116,3 +135,18 @@ export const LINE_IDS = Object.keys(LINES) as LineId[];
 export function lineSpec(id: LineId): LineSpec {
   return LINES[id];
 }
+
+/**
+ * The harness's ground truth for one line: does it announce a hold?
+ *
+ * Asked through a function so there is exactly one place the answer comes from.
+ * `LINES` is `as const`, so reading `.holdCue` off it directly does not even
+ * typecheck for the lines that omit the field — which is a useful accident,
+ * because it stops a second reading of this ground truth appearing elsewhere.
+ */
+export function lineAnnouncesHold(id: LineId): boolean {
+  return lineSpec(id).holdCue === true;
+}
+
+/** Every line the harness declares as announcing a hold. */
+export const HOLD_CUE_LINE_IDS: readonly LineId[] = LINE_IDS.filter(lineAnnouncesHold);

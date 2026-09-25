@@ -22,6 +22,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { BYTES_PER_FRAME, FRAME_MS, MULAW_SILENCE, dtmf, muLaw } from '@holdharmless/audio';
+import { HOLD_CUE_PHRASES } from '@holdharmless/classifier';
 import { PROFILES } from '@holdharmless/transport';
 import { LoopbackTransport } from '@holdharmless/transport-loopback';
 import {
@@ -29,9 +30,12 @@ import {
   HarnessServer,
   LINE_IDS,
   ScriptedMicrophone,
+  HOLD_CUE_LINE_IDS,
+  LINES,
   SPEECH_RMS,
   TURN_END_SILENCE_MS,
   captureArgs,
+  lineAnnouncesHold,
   connectControl,
   frameRms,
   micTurn,
@@ -566,6 +570,125 @@ describe('HUMAN_REP end to end', () => {
 // ---------------------------------------------------------------------------
 // perceived_response_ms — §7, §16.1
 // ---------------------------------------------------------------------------
+
+describe('agent_mute_during_conversation_ms (§16.2, module 4.2)', () => {
+  const servers: HarnessServer[] = [];
+  test.after(async () => { for (const s of servers) await s.close(); });
+
+  async function rig(callId: string) {
+    const h = await HarnessServer.start({ port: 0, profile: PROFILES.CLEAN, assets: taggedAssets(), navMode: 'dtmf', queueHoldMs: 0 });
+    servers.push(h);
+    const transport = new LoopbackTransport();
+    const telemetry: TelemetryMessage[] = [];
+    await connectControl(h.controlUrl(), (m) => { if (m.callId === callId) telemetry.push(m); });
+    await transport.dial(h.callUrl(callId), PROFILES.CLEAN);
+    transport.applyGate('open');
+    const say = async (frames: number) => {
+      for (let i = 0; i < frames; i++) {
+        transport.sendAudio(new Uint8Array(BYTES_PER_FRAME).fill(0x30), 'agent');
+        await sleep(FRAME_MS);
+      }
+    };
+    return { h, transport, say, of: (m: string) => telemetry.filter((t) => t.metric === m) };
+  }
+
+  test('a cue that was filler is charged: the agent s silence after it is the price of §6.3', async () => {
+    const r = await rig('MUTE-filler');
+    await sleep(150);
+    const s = r.h.sessions.get('MUTE-filler')!;
+    // "Let me check that for you. Okay, I see it right here." — the cue phrase
+    // with the representative carrying straight on (A-27's scenario).
+    await s.speakAs(1, 'rep1_cue_no_hold');
+    await r.say(5);
+    await sleep(200);
+    const charged = r.of('agent_mute_during_conversation_ms');
+    assert.equal(charged.length, 1);
+    assert.equal(charged[0]!.detail, 'BOT_REP');
+    assert.equal(charged[0]!.value, r.of('perceived_response_ms')[0]!.value,
+      'the same interval, and saying so beats inventing a second clock');
+    await r.transport.hangup();
+  });
+
+  test('a cue that was HONEST is not charged, and does not leak into the turn after the hold', async () => {
+    // The harness is the only party that can tell an honest cue from filler,
+    // which is exactly why §16.2 puts the metric here and not in the core.
+    //
+    // The first version of this test stopped after the hold and asserted
+    // nothing was charged — and passed for the wrong reason: `playHold` also
+    // closes the reply window, so no figure could be reported whether the flag
+    // had been cleared or not. It survived the mutation that stops clearing it.
+    // The sequence has to continue past the hold to the next turn, which is
+    // where a stale flag actually does its damage.
+    const r = await rig('MUTE-honest');
+    await sleep(150);
+    const s = r.h.sessions.get('MUTE-honest')!;
+    await s.speakAs(1, 'rep1_hold_cue');
+    await s.playHold(200, false);
+    assert.deepEqual(r.of('agent_mute_during_conversation_ms'), [], 'nothing charged during the hold');
+
+    // The representative comes back and asks something with no cue in it.
+    await s.speakAs(1, 'rep1_ask_npi');
+    await r.say(5);
+    await sleep(250);
+    assert.equal(r.of('perceived_response_ms').length, 1, 'that turn was timed');
+    assert.deepEqual(
+      r.of('agent_mute_during_conversation_ms'), [],
+      'and nothing was charged to §6.3: the cue was honest and the hold proved it',
+    );
+    await r.transport.hangup();
+  });
+
+  test('a turn with no cue in it is not charged at all', async () => {
+    const r = await rig('MUTE-plain');
+    await sleep(150);
+    const s = r.h.sessions.get('MUTE-plain')!;
+    await s.speakAs(1, 'rep1_ask_npi');
+    await r.say(5);
+    await sleep(200);
+    assert.equal(r.of('perceived_response_ms').length, 1, 'the turn was timed');
+    assert.deepEqual(r.of('agent_mute_during_conversation_ms'), [], 'but nothing was charged to §6.3');
+    await r.transport.hangup();
+  });
+
+  test('the charge does not survive to the NEXT turn', async () => {
+    const r = await rig('MUTE-once');
+    await sleep(150);
+    const s = r.h.sessions.get('MUTE-once')!;
+    await s.speakAs(1, 'rep1_cue_no_hold');
+    await r.say(5);
+    await sleep(150);
+    await s.speakAs(1, 'rep1_ask_dob');
+    await r.say(5);
+    await sleep(200);
+    assert.equal(r.of('agent_mute_during_conversation_ms').length, 1, 'one cue, one charge');
+    await r.transport.hangup();
+  });
+});
+
+describe('the harness s hold-cue ground truth against §6.3s list', () => {
+  test('it is the harness s own, and the disagreement is reported rather than enforced', () => {
+    // §16.1: the harness must not ask the system s own phrase list what it just
+    // said, or the metric agrees with the mechanism by construction. So the two
+    // are compared, and a difference is printed as a finding for A-27 — a cue
+    // §6.3 would miss, or a line it fires on that announces no hold.
+    const misses: string[] = [];
+    const surprises: string[] = [];
+    for (const id of LINE_IDS) {
+      const spec = LINES[id];
+      if (spec.role === 'ivr') continue; // §6.3 is about what a person says
+      const text = ` ${spec.text.toLowerCase()} `;
+      const listFires = HOLD_CUE_PHRASES.some((p) => text.includes(p.phrase));
+      const harnessSays = lineAnnouncesHold(id);
+      if (harnessSays && !listFires) misses.push(id);
+      if (listFires && !harnessSays) surprises.push(id);
+    }
+    // Printed, not asserted to be empty: both columns are legitimate ground
+    // truth and A-27 is the experiment that prices the gap.
+    if (misses.length > 0) console.log(`  §6.3 misses a cue the harness declares: ${misses.join(', ')}`);
+    if (surprises.length > 0) console.log(`  §6.3 fires on a line the harness says announces no hold: ${surprises.join(', ')}`);
+    assert.ok(HOLD_CUE_LINE_IDS.length >= 4, 'the harness declares at least the four lines §10.5 names');
+  });
+});
 
 describe('perceived_response_ms is produced by the harness (§16.1)', () => {
   const servers: HarnessServer[] = [];

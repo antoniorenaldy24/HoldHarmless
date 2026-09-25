@@ -36,6 +36,7 @@ import type {
 // package, which loads a Windows DLL, and this module is bundled for a browser.
 import { replay } from '@holdharmless/invariants/replay';
 import { escalationCards, type EscalationCard } from './escalation-tasks.js';
+import { derivedMetrics } from './metrics.js';
 
 // Re-exported so the dashboard has one import for everything it draws, and so
 // `@holdharmless/core/view` is a complete browser-safe surface on its own.
@@ -98,8 +99,16 @@ export type CompliancePanel = {
   disclosuresDelivered: number;
   disclosurePerParty: number[];
   overDisclosureCount: number;
-  partyDetectionMissCount: number;
+  /**
+   * From `derivedMetrics` (§16.3), not from harness telemetry. Null means the
+   * harness never reported `parties_used`, so there is no denominator — shown as
+   * "—" rather than as a zero that would read like a clean call.
+   */
+  partyDetectionMissCount: number | null;
   gateFalseCloseCount: number;
+  /** How long each false close kept the gate shut, for the §6.3 cost picture. */
+  falseCloseDurationsMs: number[];
+  hedgeAppliedCount: number;
   safetyViolations: { kind: string; detail: string }[];
   transportFaults: Record<string, number>;
   perceivedResponseMs: number[];
@@ -159,8 +168,6 @@ export function dashboardView(log: readonly CallEvent[], options: DashboardOptio
   let holdCue: ClassifierPanel['holdCue'] = null;
   let partiesDetected = 1;
   let overDisclosureCount = 0;
-  let partyDetectionMissCount = 0;
-  let gateFalseCloseCount = 0;
   let billableSessionMinutes = 0;
   let disclosedToCurrentParty = false;
   let closingKind: ClosingKind | undefined;
@@ -257,6 +264,7 @@ export function dashboardView(log: readonly CallEvent[], options: DashboardOptio
         partiesDetected = Math.max(partiesDetected, e.newIndex);
         disclosedToCurrentParty = false;
         break;
+
       case 'safety.violation':
         safetyViolations.push({ kind: e.kind, detail: e.detail });
         break;
@@ -267,9 +275,13 @@ export function dashboardView(log: readonly CallEvent[], options: DashboardOptio
         transportFaults[e.kind] = e.count;
         break;
       case 'harness.telemetry':
-        if (e.metric === 'party_detection_miss_count') partyDetectionMissCount = e.value;
-        if (e.metric === 'gate_false_close_count') gateFalseCloseCount = e.value;
         if (e.metric === 'billable_session_minutes') billableSessionMinutes = e.value;
+        // `party_detection_miss_count` and `gate_false_close_count` used to be
+        // read here. §16.3 names both as LOG DERIVATIONS and nothing sends them,
+        // so panel 7 showed 0 for both on every call — and 0 is what a working
+        // system shows. They now come from `derivedMetrics` below. The harness
+        // still owns `parties_used`, which is the denominator of the first
+        // (ADR-018) and the one part of it the core cannot know.
         // NOT derived from this log. §16.1: a metric whose zero point the core
         // cannot observe is measured at the far end, and this one's zero point
         // is the moment the harness stopped playing the representative's line.
@@ -285,6 +297,11 @@ export function dashboardView(log: readonly CallEvent[], options: DashboardOptio
         break;
     }
   }
+
+  // §16.3's derivations live in one place (metrics.ts) because the A-27 rig and
+  // any results report need the same numbers the panel shows, and two copies of
+  // "gate closed on a cue and reopened" would eventually disagree.
+  const derived = derivedMetrics(log);
 
   const last = states[states.length - 1];
   const endMs = log.length > 0 ? rel(log[log.length - 1]!) : 0;
@@ -335,8 +352,10 @@ export function dashboardView(log: readonly CallEvent[], options: DashboardOptio
       disclosuresDelivered: disclosurePerParty.reduce((a, b) => a + (b ?? 0), 0),
       disclosurePerParty: [...disclosurePerParty].map((n) => n ?? 0),
       overDisclosureCount,
-      partyDetectionMissCount,
-      gateFalseCloseCount,
+      partyDetectionMissCount: derived.partyDetectionMissCount,
+      gateFalseCloseCount: derived.gateFalseCloseCount,
+      falseCloseDurationsMs: derived.falseCloseDurationsMs,
+      hedgeAppliedCount: derived.hedgeAppliedCount,
       safetyViolations,
       transportFaults,
       perceivedResponseMs,

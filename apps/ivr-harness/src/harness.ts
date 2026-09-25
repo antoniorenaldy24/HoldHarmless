@@ -17,7 +17,7 @@ import type { NetworkProfile } from '@holdharmless/transport';
 import { LoopbackEndpoint, type FarEndSession } from '@holdharmless/transport-loopback';
 import type { AssetSource } from './assets.js';
 import { ControlServer } from './control.js';
-import { LINES, type LineId, type Role } from './lines.js';
+import { LINES, lineAnnouncesHold, type LineId, type Role } from './lines.js';
 import { MENU, MenuNavigator, NO_INPUT_TIMEOUT_MS, type MenuAction } from './menu.js';
 import { frameRms, micTurn, SPEECH_RMS, type MicrophoneSource } from './microphone.js';
 import { Pacer } from './pacer.js';
@@ -118,6 +118,18 @@ class Session implements HarnessSession {
    */
   private lastAudibleSentAtMs = 0;
   private awaitingReplyFrom: number | null = null;
+  /**
+   * Set when the turn the far end just finished contained a hold cue by the
+   * HARNESS's own reckoning (`LineSpec.holdCue`), and cleared the moment a hold
+   * actually begins.
+   *
+   * That is the whole of §16.2's "measurable only by someone who knows no hold
+   * occurred": if the cue was honest, `playHold` follows and nothing is charged;
+   * if it was conversational filler — "let me check", said while still talking —
+   * the agent's silence after it is the price of §6.3's eager list, and the
+   * harness is the only party that knows which of the two happened.
+   */
+  private cuedWithoutHold = false;
   private mic: MicrophoneSource | null = null;
   private micOpening: Promise<MicrophoneSource> | null = null;
 
@@ -149,7 +161,18 @@ class Session implements HarnessSession {
         // The mode travels with every single figure, so two modes cannot be
         // pooled by accident later (§10.6). Prose asking an analyst not to
         // pool them would be a rule with no enforcement.
-        this.telemetry('perceived_response_ms', Math.round(performance.now() - from), this.repMode);
+        const waited = Math.round(performance.now() - from);
+        this.telemetry('perceived_response_ms', waited, this.repMode);
+        if (this.cuedWithoutHold) {
+          // Same interval, different question. `perceived_response_ms` asks how
+          // responsive the agent is; this asks what §6.3's list cost on a turn
+          // where the cue was filler. They are equal by construction on such a
+          // turn, and saying so is better than inventing a second clock: the
+          // COST is this figure against the same figure on turns with no cue,
+          // which is why both are reported rather than one derived number.
+          this.cuedWithoutHold = false;
+          this.telemetry('agent_mute_during_conversation_ms', waited, this.repMode);
+        }
       }
     });
     recognizer?.onUtterance((text) => {
@@ -190,6 +213,8 @@ class Session implements HarnessSession {
     // timed ended without a reply, and timing it further would report the
     // harness's own next action as the agent's latency.
     this.awaitingReplyFrom = null;
+    // A hold DID follow, so the cue was honest and the gate was right to close.
+    this.cuedWithoutHold = false;
     const frames = Math.round(durationMs / FRAME_MS);
     if (silent) return this.pacer.play(Array.from({ length: frames }, silenceFrame));
     const music = this.assets.holdMusic();
@@ -208,7 +233,10 @@ class Session implements HarnessSession {
     // Only a REPRESENTATIVE's line starts the clock. §7 defines the metric that
     // way, and it is the right way: after a menu prompt the agent replies with
     // DTMF, which is not what this number is about.
-    if (role !== 'ivr') this.armReplyWindow();
+    if (role !== 'ivr') {
+      if (lineAnnouncesHold(lineId)) this.cuedWithoutHold = true;
+      this.armReplyWindow();
+    }
   }
 
   /**

@@ -285,8 +285,19 @@ export function Compliance({ c, profile }: { c: CompliancePanel; profile: Networ
           {c.disclosurePerParty.join(' · ') || '—'} against {c.partiesDetected} part{c.partiesDetected === 1 ? 'y' : 'ies'}
         </dd>
         <dt>Over-disclosure</dt><dd>{c.overDisclosureCount}</dd>
-        <dt>Party detection misses</dt><dd>{c.partyDetectionMissCount}</dd>
-        <dt>Gate false closes</dt><dd>{c.gateFalseCloseCount}</dd>
+        {/* Both derived from the event log (§16.3). Until module 4.2 they were
+            read from harness telemetry, which nothing sends, so both showed 0 on
+            every call — indistinguishable from a clean one. */}
+        <dt>Party detection misses</dt>
+        <dd>{c.partyDetectionMissCount === null ? <span className="dim">— no party count reported</span> : c.partyDetectionMissCount}</dd>
+        <dt>Gate false closes</dt>
+        <dd className={c.gateFalseCloseCount > 0 ? 'bad' : 'good'}>
+          {c.gateFalseCloseCount}
+          {c.falseCloseDurationsMs.length > 0 && (
+            <span className="dim"> · {median(c.falseCloseDurationsMs)} median mute</span>
+          )}
+        </dd>
+        <dt>Party hedge applied</dt><dd>{c.hedgeAppliedCount}</dd>
         <dt>Perceived response</dt>
         {/* Measured at the harness (§16.1) — the core cannot see its own zero point. */}
         <dd>{median(c.perceivedResponseMs)} <span className="dim">median, measured at the far end</span></dd>

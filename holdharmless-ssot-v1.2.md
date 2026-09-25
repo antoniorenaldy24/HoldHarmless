@@ -1087,6 +1087,8 @@ Phrases marked `yes` set `holdSuspected` **and** cue the model to call `notify_t
 
 **This list is high-frequency conversational filler, and that has a measured cost.** "Let me check" and "one moment" are things representatives say constantly while continuing to talk. Each one mutes the agent at N=1 and freezes its recovery counters until `HUMAN` is confirmed at N=2. The bias is deliberate and correctly directed, but it is not free, and §16.3 measures it in both directions — `gate_false_close_count` and `agent_mute_during_conversation_ms` exist so the cost of this list is a number before demo day rather than a surprise on stage.
 
+**Both of those metrics were built in module 4.2, and until then neither existed** — one was read from a telemetry channel nobody writes and the other had no code at all, so "the cost of this list is a number" was a plan, not a fact. The count is now derived from the log and the duration is charged at the harness. What is still missing is the experiment that uses them: A-27 needs a component that runs the semantic layer over a live call, and §21 schedules no module for it (see §6.8).
+
 ### 6.4 Signal availability
 
 Every signal carries `lastUpdated` and `maxStaleness`. Stale signals are excluded and remaining weights renormalized. If surviving weight falls below the effective `MIN_WEIGHT`, the result is `UNKNOWN` rather than a guess.
@@ -2797,7 +2799,7 @@ A metric measuring whether a mechanism works must not be measured **by** that me
 |---|---|
 | `false_speech_during_hold_count` | The gate is the mechanism meant to prevent leakage; measuring there makes it zero by construction |
 | `agent_speech_during_hold_ms` | Duration, not just count — an 80 ms leak differs from a two-second one |
-| `agent_mute_during_conversation_ms` | The cost of the `HOLD_CUE` bias, measurable only by someone who knows no hold occurred |
+| `agent_mute_during_conversation_ms` | The cost of the `HOLD_CUE` bias, measurable only by someone who knows no hold occurred. **Built in module 4.2.** The harness charges a turn when the line it spoke announces a hold *by the harness's own reckoning* and no hold then followed; `playHold` cancels the charge. Its ground truth is a `holdCue` column on its own line catalogue, deliberately NOT §6.3's `HOLD_CUE_PHRASES` — asking the system's own list what the far end just said would make this metric agree with the mechanism by construction, which is what §16.1 forbids. A disagreement between the two columns is therefore a finding for A-27, and a test prints it |
 | `hold_entry_latency_ms` | Zeroed at the end of the hold-cue phrase the harness spoke |
 | `task_success_rate` | Compared against harness ground truth. **The only number that answers whether the system works** |
 | `dtmf_success_rate` | The harness is the decoder |
@@ -2808,11 +2810,17 @@ A metric measuring whether a mechanism works must not be measured **by** that me
 
 ### 16.3 Derived from the event log
 
+**Two of these were not derived from anything (found and fixed in module 4.2).** `gate_false_close_count` and `party_detection_miss_count` were being read out of `harness.telemetry` by the dashboard, and nothing sends either. Panel 7 reported **0** for both on every call — and 0 is exactly what a clean call reports, so the failure was indistinguishable from success. The suite passed 629 tests with both hard-wired to zero, because no test existed for either. They are now computed in `apps/core/src/metrics.ts`, and a test asserts that a telemetry value for either one is **ignored**.
+
+This is the mirror of the mistake module 3.8 found in the other direction — `perceived_response_ms` being computed in the core, where §16.1 forbids it. The division between §16.2 and §16.3 fails silently in both directions, so each metric now has a test that pins which side it is on.
+
+**Why these two may be computed in the core at all,** given §16.1. `false_speech_during_hold_count` may not be, because the gate is the mechanism meant to prevent leakage and measuring at the gate makes the number zero. These two are different in kind: they count the gate and the party tracker doing exactly what they were told, against facts the log also records. Nothing asks a mechanism whether it worked. The **duration** of the same episodes stays at the harness as `agent_mute_during_conversation_ms`, because pricing the bias needs someone who knows no hold occurred.
+
 | Metric | Definition |
 |---|---|
-| `party_detection_miss_count` | `parties_used − partiesDetected`. Above zero means the hedge carried the call |
+| `party_detection_miss_count` | `parties_used − partiesDetected`. Above zero means the hedge carried the call. The numerator is the core's belief from its own log; the denominator is the harness's (ADR-018) and is the one part the core cannot know. **No denominator reported means no metric** — `null`, shown as "—" — because a miss count against an assumed denominator is a number that cannot fail |
 | `hedge_applied_count` | From `prompt.loaded` with `hedged: true` |
-| `gate_false_close_count` | Gate closed on `HOLD_CUE`, then reopened without the channel reaching `HOLD` |
+| `gate_false_close_count` | Gate closed on `HOLD_CUE`, then reopened without the channel reaching `HOLD`. **Implemented via the `hold.cleared` reason:** `setChannel` clears with `hold_confirmed` on the way into `HOLD`, and `clear('human_confirmed')` fires only while the channel is not `HOLD`, so that field *is* the "did it reach HOLD" answer, recorded by the component that knows. A separate `reachedHold` flag was carried at first and could not be made to fire on any well-formed log; it was dead and was removed. A charge also requires that the gate actually shut during the episode — a cue spoken while it was already closed muted nobody |
 | `hold_cue_to_gate_ms` | `semantic.observed(HOLD_CUE)` → `gate.changed(closed)` |
 | `hold_exit_unknown_duration_ms` | How long the semantic layer returned `UNKNOWN` while the far end spoke |
 | `outcome_before_closing_rate` | Fraction of outcome-producing calls where `outcome.written` precedes the closing turn. Target 100% |
