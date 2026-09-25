@@ -12,3 +12,4 @@ export * from './dashboard-view.js';
 export * from './server.js';
 export * from './demo-call.js';
 export * from './metrics.js';
+export * from './call.js';

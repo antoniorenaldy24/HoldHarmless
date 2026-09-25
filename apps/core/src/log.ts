@@ -14,10 +14,18 @@
  *    of the event that broke a rule; a gap would make that report point at the
  *    wrong event.
  *
- * 2. Appending is synchronous and so is notifying subscribers. §9.3 lists the
- *    events that must be written before the state they describe is acted on —
- *    a crash between the state change and its record would leave the log
- *    disagreeing with reality, and the log is what everything else believes.
+ * 2. Appending is synchronous and so is notifying subscribers, so a caller that
+ *    writes before acting genuinely has written before it acts.
+ *
+ *    CORRECTED in module 4.0: this comment used to say "§9.3 lists the events
+ *    that must be written before the state they describe is acted on". §9.3
+ *    lists no such thing — it is the event schema, and the only written-before
+ *    rule in the document is ADR-015's, about the outcome preceding the closing
+ *    utterance. The ordering is real and is now stated where it belongs (§9.3's
+ *    new note), with the distinction that matters: an OBSERVATION is logged
+ *    before it is acted on, so a gate change can never appear without the cause
+ *    that produced it; the GATE itself is applied before it is logged, because
+ *    narrowing it is a safety action and must not wait on a write.
  *
  * 3. A subscriber that throws does not break the append. The dashboard is a
  *    reader; a reader that falls over must not take the call with it.

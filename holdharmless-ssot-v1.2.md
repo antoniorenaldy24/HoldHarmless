@@ -1171,7 +1171,11 @@ Giving the semantic layer transcript deltas during `HOLD` improves detection lat
 
 Until A-7 resolves it: the semantic layer runs during `HOLD` at elevated `MIN_WEIGHT` with N=2, and every hold exit records the `sourceDelta` that triggered it.
 
-**Second risk, recorded in module 4.1: nothing feeds the acoustic layer yet.** `createAcousticClassifier` has no production caller — only tests and `scripts/mic-check.ts`. Whatever wires it into the receive path must push **silence on the line as silence frames**, not as an absence of frames. `createSignalWindows` keeps its window by timestamp, so a gap in feeding is not a pause: it is fewer samples over which the same ratio is computed. A feed that goes quiet when the far end goes quiet would starve the pause-ratio signal of the one thing that defines it, and every figure in §6.7's table would be measuring something else.
+**Second risk, recorded in module 4.1 and CLOSED in module 4.0.** `createAcousticClassifier` had no production caller — only tests and `scripts/mic-check.ts`. It now has one, and the trap named alongside it is enforced by a test rather than by a comment: **silence on the line is pushed as silence frames**, because `createSignalWindows` keeps its window by timestamp, so a gap in feeding is not a pause — it is fewer samples over which the same ratio is computed. A feed that went quiet when the far end went quiet would starve the pause-ratio signal of the one thing that defines it.
+
+That test is asserted against a spy classifier, not against the loop's own frame counter. The first version counted the counter, which a loop that skipped silent frames would still increment; it measured the counter rather than the wiring, and the mutation that skips quiet frames survived it.
+
+**Third risk, found BY assembling and now guarded: the semantic layer latches.** It accumulates deltas into one utterance and matches §6.3's phrases against the whole of it; `endTurn()` clears the buffer. An assembly that never calls it leaves "let me check" in the buffer for the rest of the call, so every later observation reads `HOLD_CUE`, `humanRun` never reaches N=2, suspicion never clears, and **the gate never reopens — the agent is mute from the first cue phrase to the end of the call.** Nothing in the classifier's own tests could see this, because they push one utterance at a time. `TranscriptSource` therefore requires a turn-end signal, and it is not optional.
 
 ---
 
@@ -1957,6 +1961,13 @@ type SemanticObservation = {
 ```
 
 ### 9.3 Event schema
+
+**Two ordering rules, written down in module 4.0 because assembling the call loop needed them and neither was stated anywhere.** They are not the same rule in two directions; they are two rules with opposite answers, and each is right for its own reason.
+
+- **An observation is logged BEFORE it is acted on.** `acoustic.observed` and `semantic.observed` are the CAUSE of whatever the Call Model does next. Writing first means a `gate.changed` can never appear without the observation that produced it. The other order can lose the cause and leave a gate change no reader can explain — including `replay()`, which reports the sequence number of the event that broke a rule.
+- **The gate is applied BEFORE it is logged.** `recompute` calls `applyGate` and then emits. Narrowing the gate is ADR-007's second layer against leakage and must not wait on a log write. A gate applied but unlogged is a safe call with an incomplete record; a gate logged but unapplied is the reverse, and the reverse is the one that leaks.
+
+`apps/core/src/log.ts` previously attributed the first rule to this section, which stated nothing of the kind: the only written-before rule in this document is ADR-015's, about the outcome preceding the closing utterance. The comment is corrected and the rules live here.
 
 ```typescript
 type Producer =
@@ -3122,8 +3133,11 @@ E1 is deliberately **not** a Day-0 blocker here: with both endpoints local, tone
 
 ### Week 4 — hardening and rehearsal
 
+**The build order was missing its assembly module, and module 4.0 is it.** Thirty-four modules build components; not one wires them into a call. Module 4.5 asks for "fifteen full runs", which presumes a call that runs. Found while starting 4.2: A-14 and A-27 both need a call, `createAcousticClassifier` had no production caller at all (§6.8), and nothing implemented the `Pipeline` that `packages/fixtures` declares. It is numbered **4.0** because it belongs before everything else in week 4 — the numbering records when it was noticed, not where it sits.
+
 | # | Module | Acceptance criteria |
 |---|---|---|
+| **4.0** | **The call loop** | **Audio in → classifiers → suspicion → gate out, over the real transport. Built 2026-09-26 in `apps/core/src/call.ts`. The OBSERVATION half only: it does not drive the Work Queue, redial, the closing sequence, prompts or per-position session updates, and until the reply half lands nothing here should be read as "the system runs a call". Eight mutations, eight killed. Two rules had to be written down to build it (§9.3) and one latch was found that no component test could see (§6.8)** |
 | 4.1 | `HUMAN_REP` mode | Live microphone path working; classifier holds its calibration figures; latency reported separately. **Built 2026-09-25 in `apps/ivr-harness/src/microphone.ts`. Criteria 1 and 3 met: `streamMicrophone` streams one endpointed turn from an ffmpeg capture device, and `perceived_response_ms` now HAS a producer — it was consumed by panel 7 and written by nothing — reported with `rep_mode` on every figure so the two modes cannot be pooled. Twelve mutations, twelve killed; the one that survived the first pass was the latency zero point, the subtlest thing in the module. Criterion 2 is NOT met and the reason is a finding, not a delay: the measurement built to answer it (`scripts/mic-check.ts`) showed the acoustic layer closing the gate on 22 of 23 rendered representative lines, because it had no decision margin at all (§6.4). `ACOUSTIC_MARGIN` takes that to 9 of 23 at no cost; the remaining 9 is an operating-point decision recorded in §6.7 for the owner, and every figure in it is rendered audio until §6.6's recordings exist (`docs/recording-script.md`)** |
 | 4.2 | Backchannel and mute cost | **A-14 passes**; **A-27 passes** |
 | 4.3 | Minimum necessary | **A-31 passes** |
