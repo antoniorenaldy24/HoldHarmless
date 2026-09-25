@@ -35,6 +35,14 @@ Rekamanmu akan lewat **rantai ffmpeg yang persis sama** dengan aset rendered (`l
 
 **Mikrofon.** 15–25 cm dari mulut. Headset, mikrofon laptop, atau ponsel — semuanya sah; catat saja pakai apa (ada kolomnya di bawah).
 
+> **Periksa ini dulu.** Saya sudah menjalankan jalur mikrofon di mesin ini (modul 4.1), dan satu-satunya perangkat audio yang terdaftar adalah **`Microphone (Iriun Webcam)`** — yang **mengeluarkan senyap total** selama aplikasi Iriun di ponselmu tidak berjalan. Perangkat itu terbuka, mengalirkan frame dengan rapi, dan puncak RMS-nya **0**. Jadi sebelum merekam apa pun, pastikan ada mikrofon yang benar-benar menangkap suara. Daftar perangkat:
+>
+> ```bash
+> ffmpeg -list_devices true -f dshow -i dummy
+> ```
+>
+> Kalau kamu merekam dengan aplikasi perekam biasa (Audacity, Voice Recorder), cukup pastikan gelombangnya bergerak saat kamu bicara — itu sudah menjawab pertanyaan yang sama.
+
 **Ruangan.** Ruangan biasa yang tenang. Jangan kejar senyap total, dan jangan juga rekam di dekat kipas angin atau di dalam mobil berjalan.
 
 **Cara membaca — ini yang paling penting.**
