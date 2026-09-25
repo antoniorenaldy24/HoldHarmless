@@ -1159,6 +1159,8 @@ Every observation carries `signalsAvailable` and `windowsMs`. Without both, a co
 
 §6.7's way out was tried and failed: requiring **two** signals to vote `PERIODIC`, rather than letting one carry a weighted majority, gives 9 of 23 and 1250 ms — exactly what the margin alone already gives. It is not offered as an answer.
 
+**The table regenerates: `pnpm mic-check --sweep`.** It was first produced by a throwaway script, which made it a remembered measurement rather than a reproducible one; two tests in `packages/classifier/test/acoustic.test.ts` pin its edges and that command redraws the whole curve.
+
 **All of it is measured on rendered audio.** `pnpm mic-check --file` re-runs every figure above on a human voice, which is what §6.6's recordings are for.
 
 ### 6.8 Known unresolved risk

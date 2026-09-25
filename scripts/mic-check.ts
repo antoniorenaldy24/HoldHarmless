@@ -13,6 +13,7 @@
  * This script is what decides that question, on whatever audio it is given.
  *
  *   pnpm mic-check --assets                  the rendered rep1 lines
+ *   pnpm mic-check --sweep                   regenerate §6.7's margin table
  *   pnpm mic-check --file <path>             a recording (docs/recording-script.md)
  *   pnpm mic-check --device "<name>"         one live turn from the microphone
  *
@@ -41,7 +42,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BYTES_PER_FRAME, FRAME_MS, muLaw } from '@holdharmless/audio';
 import { createSignalWindows } from '@holdharmless/audio';
-import { SILENCE_RMS, createAcousticClassifier } from '@holdharmless/classifier';
+import { ACOUSTIC_MARGIN, SILENCE_RMS, createAcousticClassifier } from '@holdharmless/classifier';
 import { ASSET_DIR, ScriptedMicrophone, SPEECH_RMS, frameRms, micTurn } from '@holdharmless/ivr-harness';
 import type { AcousticClass } from '@holdharmless/events';
 
@@ -51,7 +52,7 @@ const RECORDED = {
   'representative lines (rendered)': { pauseRatio: [0.4, 0.46], spectralFlatness: [0.008, 0.043], autocorrelation: [0.02, 0.05] },
 } as const;
 
-type Args = { assets: boolean; file?: string; device?: string; seconds: number };
+type Args = { assets: boolean; sweep: boolean; file?: string; device?: string; seconds: number };
 
 const need = (v: string | undefined, flag: string): string => {
   if (v === undefined) throw new Error(`${flag} needs a value`);
@@ -59,16 +60,17 @@ const need = (v: string | undefined, flag: string): string => {
 };
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { assets: false, seconds: 12 };
+  const out: Args = { assets: false, sweep: false, seconds: 12 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--assets') out.assets = true;
+    else if (a === '--sweep') out.sweep = true;
     else if (a === '--file') out.file = need(argv[++i], '--file');
     else if (a === '--device') out.device = need(argv[++i], '--device');
     else if (a === '--seconds') out.seconds = Number(argv[++i]);
     else throw new Error(`unknown argument ${a}`);
   }
-  if (!out.assets && !out.file && !out.device) throw new Error('one of --assets, --file, --device is required');
+  if (!out.assets && !out.sweep && !out.file && !out.device) throw new Error('one of --assets, --sweep, --file, --device is required');
   return out;
 }
 
@@ -256,6 +258,123 @@ async function turnFigures(frames: readonly Uint8Array[]): Promise<string> {
   turn.stop();
   const r = await turn.done;
   return `turn gate: ${out.length}/${frames.length} frames forwarded, ended by ${r.endedBy}, speech RMS ${Math.round(r.speechRms)}`;
+}
+
+// ---------------------------------------------------------------------------
+// --sweep: §6.7's margin table, regenerated
+// ---------------------------------------------------------------------------
+
+/**
+ * Regenerates the table in §6.7 — every value of `ACOUSTIC_MARGIN` against
+ * every criterion this layer has at once.
+ *
+ * It exists because the first version of that table was produced by a throwaway
+ * script, which made it a remembered measurement rather than a reproducible one.
+ * The two tests in `packages/classifier/test/acoustic.test.ts` pin the EDGES —
+ * that the chosen margin keeps hold onset under 1.5 s and that one step up does
+ * not, and that the margin more than halves the false closures — and this
+ * regenerates the whole curve the choice was made from.
+ *
+ * The audio is the classifier tests' own generators, reproduced here rather than
+ * imported because they live in a test file. Any divergence would make a figure
+ * here and a figure there mean different things, so the speech generator is
+ * copied verbatim, comments and all.
+ */
+async function sweepMargin(): Promise<void> {
+  const { createAcousticClassifier, EMIT_INTERVAL_MS } = await import('@holdharmless/classifier');
+  const { holdMusicPcm } = await import('@holdharmless/ivr-harness');
+  const { SAMPLE_RATE } = await import('@holdharmless/audio');
+
+  /** Bursts of correlated noise separated by pauses — acoustic.test.ts's. */
+  const syntheticSpeech = (seconds: number): Int16Array => {
+    const out: number[] = [];
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 2 - 1;
+    const uniform = (lo: number, hi: number) => lo + ((rnd() + 1) / 2) * (hi - lo);
+    let prev = 0;
+    while (out.length < seconds * SAMPLE_RATE) {
+      const burst = Math.round(SAMPLE_RATE * uniform(0.18, 0.55));
+      for (let i = 0; i < burst; i++) {
+        prev = 0.6 * rnd() + 0.4 * prev;
+        out.push(Math.round(prev * 9000));
+      }
+      const pause = Math.round(SAMPLE_RATE * uniform(0.1, 0.35));
+      for (let i = 0; i < pause; i++) out.push(0);
+    }
+    return Int16Array.from(out.slice(0, seconds * SAMPLE_RATE));
+  };
+
+  type Obs = { winner: string };
+  const feed = (
+    c: ReturnType<typeof createAcousticClassifier>,
+    source: Int16Array,
+    seconds: number,
+    opts: { startMs?: number } = {},
+  ): Obs[] => {
+    const out: Obs[] = [];
+    const frames = Math.round((seconds * SAMPLE_RATE) / 160);
+    for (let f = 0; f < frames; f++) {
+      const frame = new Int16Array(160);
+      for (let j = 0; j < 160; j++) frame[j] = source[(f * 160 + j) % source.length]!;
+      const o = c.push(frame, (opts.startMs ?? 0) + f * 20);
+      if (o) out.push(o);
+    }
+    return out;
+  };
+
+  const MUSIC = holdMusicPcm();
+  const SPEECH30 = syntheticSpeech(30);
+  const SPEECH25 = syntheticSpeech(25);
+  const assets = repAssetFrames();
+
+  const onsetMs = (margin: number): number => {
+    const c = createAcousticClassifier({ margin });
+    feed(c, SPEECH30, 30);
+    const i = feed(c, MUSIC, 4, { startMs: 30_000 }).findIndex((o) => o.winner === 'PERIODIC');
+    return i < 0 ? Infinity : (i + 1) * EMIT_INTERVAL_MS;
+  };
+
+  const lastWinner = (margin: number, src: Int16Array): string =>
+    feed(createAcousticClassifier({ margin }), src, 25).at(-1)!.winner;
+
+  const mixed = Int16Array.from(SPEECH25, (v, i) => v + Math.round(MUSIC[i % MUSIC.length]! * 0.2));
+
+  const falseCloses = (margin: number): { lines: number; obs: number } => {
+    let lines = 0;
+    let obs = 0;
+    for (const { frames } of assets) {
+      const c = createAcousticClassifier({ margin });
+      let hits = 0;
+      frames.forEach((frame, i) => {
+        const o = c.push(muLaw.decode(frame), i * FRAME_MS);
+        if (o?.winner === 'PERIODIC' && frameRms(frame) >= SPEECH_RMS) hits++;
+      });
+      if (hits > 0) lines++;
+      obs += hits;
+    }
+    return { lines, obs };
+  };
+
+  console.log(`\n--sweep: §6.7's table, on ${assets.length} rendered rep1 lines and the classifier tests' own audio.`);
+  console.log('The chosen value is the largest one that costs nothing: see ACOUSTIC_MARGIN in acoustic.ts.\n');
+  console.log('  margin   mutes the agent        hold onset   music      speech       speech over music');
+  for (const margin of [0, 0.02, 0.04, 0.05, 0.06, 0.08, 0.1, 0.15, 0.2]) {
+    const fc = falseCloses(margin);
+    const on = onsetMs(margin);
+    const mark = margin === ACOUSTIC_MARGIN ? ' <- ACOUSTIC_MARGIN' : on > 1500 ? '  (past the 1.5 s bar)' : '';
+    console.log(
+      `  ${margin.toFixed(2)}     ${String(fc.lines).padStart(2)}/${assets.length} lines, ${String(fc.obs).padStart(2)} obs   ` +
+        `${(on === Infinity ? 'never' : `${on} ms`).padStart(8)}   ${lastWinner(margin, MUSIC).padEnd(10)} ` +
+        `${lastWinner(margin, SPEECH25).padEnd(12)} ${lastWinner(margin, mixed)}${mark}`,
+    );
+  }
+  console.log('\n"mutes the agent" = observations classified PERIODIC while the frame contained speech.');
+  console.log('§6.5 sets holdSuspected on ONE of those, and ADR-007 closes the gate on holdSuspected.');
+}
+
+if (parseArgs(process.argv.slice(2)).sweep) {
+  await sweepMargin();
+  process.exit(process.exitCode ?? 0);
 }
 
 const args = parseArgs(process.argv.slice(2));
