@@ -23,14 +23,17 @@
  * over a stream that is already running. That moves startup cost out of the
  * per-turn path entirely, and it is reported once as `mic_startup_latency_ms`.
  *
- * WHAT THIS PATH CAN AND CANNOT MEASURE. It can measure everything after the
- * first byte reaches this process: `mic_frame_delay_ms` is each frame's lateness
- * against the real-time cadence the first frame established, which is what a
- * pipe stall or a GC pause looks like, and it is what actually breaks live
- * audio. It CANNOT measure the acoustic path — microphone, driver, and the
- * device's own buffering before ffmpeg sees anything. That needs a loopback
- * reference (emit a click, record it back) and is not attempted here. So the
- * figure this path reports is a LOWER BOUND on `HUMAN_REP` capture latency, and
+ * WHAT THIS PATH CAN AND CANNOT MEASURE. It measures delay VARIATION:
+ * `mic_frame_delay_ms` is each frame's lateness against the fastest arrival-to-
+ * stream-position relationship seen so far, which is what a pipe stall or a GC
+ * pause looks like, and it is what actually breaks live audio. It CANNOT measure
+ * the constant part — microphone, driver, and the device's own buffering before
+ * ffmpeg sees anything — which needs a loopback reference (emit a click, record
+ * it back) and is not attempted here. Discarding that constant is deliberate and
+ * is what makes the number honest rather than arbitrary: see `consume`, where
+ * anchoring to the first frame instead was measured putting a permanent -480 ms
+ * on every reading. So the figure this path reports is a LOWER BOUND on
+ * `HUMAN_REP` capture latency, and
  * §10.6's rule that `HUMAN_REP` figures are reported separately from `BOT_REP`
  * figures is exactly why that lower bound is still worth having: the two are
  * never pooled, so an unmeasured constant offset cannot contaminate a `BOT_REP`
@@ -69,11 +72,27 @@ export const SPEECH_RMS = 250;
 export type MicFrame = {
   frame: Uint8Array;
   /**
-   * When this frame's audio was captured, on `performance.now()`'s clock,
-   * derived from the first frame's arrival plus the frame's offset in the
-   * stream. Relative to the first frame, not absolute: see the header.
+   * The AUDIO TIMELINE: consecutive frames are exactly `FRAME_MS` apart, by
+   * construction, whatever order or bursts the bytes arrived in. Carries an
+   * unknown constant offset — the acoustic and buffering latency no software on
+   * this side can see — so differences are meaningful and the absolute value is
+   * not.
    */
   capturedAtMs: number;
+  /**
+   * ARRIVAL LATENESS against the fastest arrival-to-stream-position relationship
+   * seen so far. Never negative.
+   *
+   * This is a separate field because the two numbers want opposite things and
+   * one field cannot be both. `capturedAtMs` must keep the 20 ms spacing, or a
+   * turn whose audio arrived in bursts would report a compressed length and
+   * `lastSpeechAtMs` would be wrong. `delayMs` must discount the constant
+   * buffering, or the flush ffmpeg performs at device open — measured at 480 ms
+   * on real hardware — becomes a permanent negative offset on every reading and
+   * a genuine stall can never show as positive. Deriving one from the other is
+   * what the first version of this module did, and it got one of them wrong.
+   */
+  delayMs: number;
 };
 
 export interface MicrophoneSource {
@@ -146,6 +165,8 @@ export class FfmpegMicrophone implements MicrophoneSource {
   private pending = new Uint8Array(0);
   private firstFrameAt: number | null = null;
   private framesEmitted = 0;
+  /** The smallest (arrival - stream position) seen; see `consume`. */
+  private minOffsetMs: number | null = null;
   private openedAt = 0;
   private stderr = '';
   private readonly clock: () => number;
@@ -217,9 +238,21 @@ export class FfmpegMicrophone implements MicrophoneSource {
         this.startupLatencyMsValue = arrivedAt - this.openedAt;
         wasFirst = true;
       }
-      const capturedAtMs = this.firstFrameAt + this.framesEmitted * FRAME_MS;
+      const streamPositionMs = this.framesEmitted * FRAME_MS;
       this.framesEmitted++;
-      for (const h of this.handlers) h({ frame, capturedAtMs });
+      // The timeline is anchored to the first frame, so the 20 ms spacing holds.
+      const capturedAtMs = this.firstFrameAt + streamPositionMs;
+      // The delay is anchored to the SMALLEST (arrival - stream position) seen
+      // so far — the standard one-way delay-variation measure. It discards the
+      // unmeasurable constant (buffering, driver, the acoustic path) and keeps
+      // the variation, which is what breaks live audio and what this can see.
+      // Found by running against real hardware: ffmpeg flushes a buffer at
+      // open, 174 frames of a 3480 ms stream arriving in 3000 ms of wall time,
+      // which anchored any other way puts a standing -480 ms on every reading.
+      const offset = arrivedAt - streamPositionMs;
+      if (this.minOffsetMs === null || offset < this.minOffsetMs) this.minOffsetMs = offset;
+      const delayMs = offset - this.minOffsetMs;
+      for (const h of this.handlers) h({ frame, capturedAtMs, delayMs });
     }
     this.pending = joined.slice(off);
     return wasFirst;
@@ -289,7 +322,8 @@ export class ScriptedMicrophone implements MicrophoneSource {
     if (!frame) return;
     const capturedAtMs = this.t0 + this.index * FRAME_MS;
     this.index++;
-    for (const h of this.handlers) h({ frame, capturedAtMs });
+    // Synthetic frames arrive on time by definition; there is no pipe to stall.
+    for (const h of this.handlers) h({ frame, capturedAtMs, delayMs: 0 });
   }
 
   get exhausted(): boolean {
@@ -331,7 +365,7 @@ export type TurnResult = {
    * speaking; what the harness took to notice is the harness's.
    */
   lastSpeechAtMs: number | null;
-  /** Per-frame lateness against the cadence the first frame established. */
+  /** Each frame's `delayMs`, as the source measured it. */
   frameDelaysMs: number[];
   /** Mean RMS over the speech frames — what the level check reads. */
   speechRms: number;
@@ -346,7 +380,6 @@ export type TurnOptions = {
   maxMs?: number;
   onsetTimeoutMs?: number;
   speechRms?: number;
-  clock?: () => number;
   /** Injected in tests; real time otherwise. */
   schedule?: (fn: () => void, ms: number) => { cancel: () => void };
 };
@@ -365,7 +398,6 @@ export function micTurn(opts: TurnOptions): { done: Promise<TurnResult>; stop: (
   const maxMs = opts.maxMs ?? TURN_MAX_MS;
   const onsetMs = opts.onsetTimeoutMs ?? TURN_ONSET_TIMEOUT_MS;
   const speechRms = opts.speechRms ?? SPEECH_RMS;
-  const clock = opts.clock ?? (() => performance.now());
   const schedule =
     opts.schedule ??
     ((fn, ms) => {
@@ -405,9 +437,9 @@ export function micTurn(opts: TurnOptions): { done: Promise<TurnResult>; stop: (
   // for speaking at all; it is replaced by the duration cap at onset.
   timers.push(schedule(() => end('no_onset'), onsetMs));
 
-  unsubscribe = opts.source.onFrame(({ frame, capturedAtMs }) => {
+  unsubscribe = opts.source.onFrame(({ frame, capturedAtMs, delayMs }) => {
     if (settled) return;
-    frameDelaysMs.push(clock() - capturedAtMs);
+    frameDelaysMs.push(delayMs);
     const rms = frameRms(frame);
     const isSpeech = rms >= speechRms;
 

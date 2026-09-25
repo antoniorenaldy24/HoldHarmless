@@ -250,10 +250,10 @@ async function liveTurn(device: string, seconds: number): Promise<Uint8Array[]> 
 async function turnFigures(frames: readonly Uint8Array[]): Promise<string> {
   const mic = new ScriptedMicrophone([]);
   const out: Uint8Array[] = [];
-  const turn = micTurn({ source: mic, emit: (f) => out.push(f), clock: () => 0, silenceMs: 700 });
-  const handlers = (mic as unknown as { handlers: ((f: { frame: Uint8Array; capturedAtMs: number }) => void)[] }).handlers;
+  const turn = micTurn({ source: mic, emit: (f) => out.push(f), silenceMs: 700 });
+  const handlers = (mic as unknown as { handlers: ((f: { frame: Uint8Array; capturedAtMs: number; delayMs: number }) => void)[] }).handlers;
   frames.forEach((frame, i) => {
-    for (const h of handlers) h({ frame, capturedAtMs: i * FRAME_MS });
+    for (const h of handlers) h({ frame, capturedAtMs: i * FRAME_MS, delayMs: 0 });
   });
   turn.stop();
   const r = await turn.done;

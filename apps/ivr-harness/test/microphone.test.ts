@@ -62,7 +62,6 @@ function harnessedTurn(opts: { silenceMs?: number; maxMs?: number; onsetTimeoutM
   const turn = micTurn({
     source: mic,
     emit: (f) => emitted.push(f),
-    clock: () => now,
     schedule: (fn, ms) => {
       const entry = { at: now + ms, fn, cancelled: false };
       fires.push(entry);
@@ -70,11 +69,11 @@ function harnessedTurn(opts: { silenceMs?: number; maxMs?: number; onsetTimeoutM
     },
     ...opts,
   });
-  /** Feeds one frame, stamped as captured exactly on cadence. */
-  const feed = (frame: Uint8Array) => {
+  /** Feeds one frame, stamped as captured exactly on cadence and on time. */
+  const feed = (frame: Uint8Array, delayMs = 0) => {
     const capturedAtMs = now;
     now += FRAME_MS;
-    for (const h of (mic as unknown as { handlers: ((f: MicFrame) => void)[] }).handlers) h({ frame, capturedAtMs });
+    for (const h of (mic as unknown as { handlers: ((f: MicFrame) => void)[] }).handlers) h({ frame, capturedAtMs, delayMs });
   };
   const advanceTo = (t: number) => {
     now = t;
@@ -161,14 +160,17 @@ describe('a microphone turn (§10.6)', () => {
     assert.equal((await h.turn.done).endedBy, 'stopped');
   });
 
-  test('frame delay is measured against the cadence, not against arrival order', async () => {
+  test('the turn passes on the delay the source measured, and measures none of its own', async () => {
+    // The two numbers are separate fields on MicFrame for a reason the type
+    // records: the timeline must keep its 20 ms spacing, the delay must discount
+    // the constant buffering, and one field cannot be both. A turn that
+    // recomputed the delay from the timeline would reintroduce exactly the
+    // standing offset the source exists to remove.
     const mic = new ScriptedMicrophone([]);
-    let now = 500;
-    const turn = micTurn({ source: mic, emit: () => {}, clock: () => now, silenceMs: 10_000 });
+    const turn = micTurn({ source: mic, emit: () => {}, silenceMs: 10_000 });
     const handlers = (mic as unknown as { handlers: ((f: MicFrame) => void)[] }).handlers;
-    handlers[0]!({ frame: loud(), capturedAtMs: 500 });  // on time
-    now = 560;
-    handlers[0]!({ frame: loud(), capturedAtMs: 520 });  // 40 ms late
+    handlers[0]!({ frame: loud(), capturedAtMs: 500, delayMs: 0 });
+    handlers[0]!({ frame: loud(), capturedAtMs: 520, delayMs: 40 });
     turn.stop();
     assert.deepEqual((await turn.done).frameDelaysMs, [0, 40]);
   });
@@ -286,6 +288,41 @@ describe('the capture device', () => {
       [0, FRAME_MS, FRAME_MS * 2],
       'capture times follow the cadence, not the chunking',
     );
+    assert.ok(frames.every((f) => f.delayMs >= 0), 'and no delay is negative');
+    await mic.close();
+  });
+
+  test('a buffer flushed at open does not put a permanent negative offset on every delay', async () => {
+    // Found by running this against real hardware: ffmpeg opens the device,
+    // buffers, then flushes — 174 frames (3480 ms of audio) in the first 3000 ms
+    // of wall time. Anchored to frame zero's arrival, the stream position runs
+    // permanently ahead of the clock by the depth of that flush and every delay
+    // reads about -480 ms, so a real stall could never show as positive.
+    const proc = fakeProc();
+    let now = 0;
+    const mic = new FfmpegMicrophone({ device: 'x', spawn: () => proc, clock: () => now });
+    const frames: MicFrame[] = [];
+    mic.onFrame((f) => frames.push(f));
+    const opening = mic.open();
+
+    // 25 frames (500 ms of audio) arrive in one chunk, at one instant.
+    proc.stdout.write(Buffer.from(new Uint8Array(BYTES_PER_FRAME * 25).fill(0x20)));
+    await opening;
+    // Then the stream runs in real time: one frame per 20 ms.
+    for (let i = 0; i < 10; i++) {
+      now += FRAME_MS;
+      proc.stdout.write(Buffer.from(new Uint8Array(BYTES_PER_FRAME).fill(0x20)));
+      await sleep(0);
+    }
+    const steady = frames.slice(25).map((f) => f.delayMs);
+    assert.ok(
+      steady.every((d) => d >= 0 && d <= FRAME_MS),
+      `steady-state delays are ${JSON.stringify(steady)} ms; the 500 ms flush has been baked into the anchor`,
+    );
+    // And the timeline is untouched by the flush: the 25 frames that arrived at
+    // one instant still describe 500 ms of audio, because they were 500 ms of
+    // audio. Collapsing them would shorten every turn delivered in one chunk.
+    assert.equal(frames[24]!.capturedAtMs - frames[0]!.capturedAtMs, 24 * FRAME_MS);
     await mic.close();
   });
 
@@ -350,16 +387,16 @@ describe('HUMAN_REP end to end', () => {
     async sayPaced(loudFrames: number, quietFrames: number): Promise<void> {
       for (let i = 0; i < loudFrames + quietFrames; i++) {
         const frame = i < loudFrames ? loud() : quiet();
-        for (const h of [...this.handlers]) h({ frame, capturedAtMs: performance.now() });
+        for (const h of [...this.handlers]) h({ frame, capturedAtMs: performance.now(), delayMs: 0 });
         await sleep(FRAME_MS);
       }
     }
     say(loudFrames: number, quietFrames: number): void {
       const t0 = performance.now();
       let n = 0;
-      for (let i = 0; i < loudFrames; i++) for (const h of [...this.handlers]) h({ frame: loud(), capturedAtMs: t0 + n++ * FRAME_MS });
+      for (let i = 0; i < loudFrames; i++) for (const h of [...this.handlers]) h({ frame: loud(), capturedAtMs: t0 + n++ * FRAME_MS, delayMs: 0 });
       n = loudFrames;
-      for (let i = 0; i < quietFrames; i++) for (const h of [...this.handlers]) h({ frame: quiet(), capturedAtMs: t0 + n++ * FRAME_MS });
+      for (let i = 0; i < quietFrames; i++) for (const h of [...this.handlers]) h({ frame: quiet(), capturedAtMs: t0 + n++ * FRAME_MS, delayMs: 0 });
     }
     close(): Promise<void> { return Promise.resolve(); }
   }
