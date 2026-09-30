@@ -561,9 +561,37 @@ describe('the harness over the loopback transport', () => {
     // constant would pass the threshold below without measuring anything.
     assert.equal(result.spreadMs, spreadOf(result.offsetsMs));
     assert.equal(result.offsetsMs.length, 100);
-    assert.ok(result.spreadMs < 2, `clock spread was ${result.spreadMs.toFixed(1)} ms — offset estimation would be needed`);
-    assert.ok(Math.abs(result.medianOffsetMs) < 2, `median offset ${result.medianOffsetMs.toFixed(1)} ms`);
+    // THE MEDIAN CARRIES A-30; THE SPREAD MEASURES THE INSTRUMENT.
+    //
+    // This used to assert `spreadMs < 2` as the evidence of "one clock", and it
+    // failed on a loaded Windows CI runner at exactly 2.0 ms (2026-09-30) while
+    // six local runs read 0.5-1.0. But spread is BLIND to what A-30 is about:
+    // a constant clock offset shifts every sample equally and leaves the spread
+    // untouched — the test below builds exactly that and gets a spread of 0.
+    // What a constant offset moves is the median, which is asserted here and
+    // carries the claim. The spread is bounded by what the round trip and the
+    // 1 ms quantum of `Date.now()` can explain; each offset assumes a
+    // symmetric round trip, so two can disagree by up to that round trip. A
+    // spread beyond it is jitter the instrument cannot account for, and fails.
+    assert.ok(Math.abs(result.medianOffsetMs) < 2, `median offset ${result.medianOffsetMs.toFixed(1)} ms — offset estimation would be needed`);
+    const explainable = Math.max(1, result.maxRoundTripMs) + 1;
+    assert.ok(
+      result.spreadMs <= explainable,
+      `spread ${result.spreadMs.toFixed(1)} ms exceeds the ${explainable.toFixed(1)} ms that a ${result.maxRoundTripMs.toFixed(1)} ms round trip and the 1 ms quantum can explain`,
+    );
     await c.close();
+  });
+
+  test('A-30 s real evidence is the median: a constant clock offset leaves the spread at zero', () => {
+    // Why the assertion above is aimed at the median. A harness clock running a
+    // steady 50 ms ahead, sampled over perfectly symmetric 2 ms round trips:
+    const offsets = Array.from({ length: 100 }, (_, i) => {
+      const sent = 1000 + i * 10;
+      return clockOffsetMs(sent, sent + 1 + 50, sent + 2);
+    });
+    assert.equal(spreadOf(offsets), 0, 'the spread cannot see a constant offset at all');
+    const sorted = [...offsets].sort((a, b) => a - b);
+    assert.equal(sorted[50], 50, 'the median sees all of it');
   });
 
   test('a line can only be spoken by the persona whose voice rendered it', async () => {
