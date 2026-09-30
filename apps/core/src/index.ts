@@ -13,3 +13,4 @@ export * from './server.js';
 export * from './demo-call.js';
 export * from './metrics.js';
 export * from './call.js';
+export * from './audio-bridge.js';
