@@ -14,6 +14,7 @@ import { BYTES_PER_FRAME, FRAME_MS, MULAW_SILENCE, muLaw } from '@holdharmless/a
 import { PROFILES, gateAdmits } from '@holdharmless/transport';
 import type { AudioSource, CallTransport } from '@holdharmless/transport';
 import type { AuthRequest, GateIntent, SemanticObservation } from '@holdharmless/events';
+import { HOLD_CONFIRM_MS, type ChannelTimers } from '@holdharmless/callmodel';
 import { createEventLog, startCallLoop, type TranscriptSource } from '../src/index.js';
 
 const request = (over: Partial<AuthRequest> = {}): AuthRequest => ({
@@ -28,12 +29,14 @@ const request = (over: Partial<AuthRequest> = {}): AuthRequest => ({
  *  the real one enforces it, through `gateAdmits`. */
 function fakeTransport() {
   let intent: GateIntent = 'closed';
+  let onClosed: ((cause: 'far_end_hangup' | 'link_drop' | 'timeout') => void) | null = null;
+  let refuse: string | null = null;
   const gates: GateIntent[] = [];
   const sent: { frame: Uint8Array; source: AudioSource }[] = [];
   let onAudio: ((f: Uint8Array) => void) | null = null;
   const t: CallTransport = {
     kind: 'loopback',
-    dial: async () => {},
+    dial: async () => { if (refuse !== null) throw new Error(refuse); },
     sendAudio(frame, source) {
       if (!gateAdmits(intent, source)) return false;
       sent.push({ frame, source });
@@ -47,9 +50,15 @@ function fakeTransport() {
     onAudio(h) { onAudio = h; },
     onMark() {},
     onFault() {},
-    onClosed() {},
+    onClosed(h) { onClosed = h; },
   };
-  return { t, gates, sent, feed: (f: Uint8Array) => onAudio?.(f), get intent() { return intent; } };
+  return {
+    t, gates, sent,
+    feed: (f: Uint8Array) => onAudio?.(f),
+    close: (cause: 'far_end_hangup' | 'link_drop' | 'timeout') => onClosed?.(cause),
+    refuseDial: (why: string) => { refuse = why; },
+    get intent() { return intent; },
+  };
 }
 
 function transcriptSource() {
@@ -79,6 +88,23 @@ function rig(over: { navMode?: 'dtmf' | 'speech' } = {}) {
   const ts = transcriptSource();
   const log = createEventLog({ callId: 'CALL-L' });
   let ms = 0;
+  // The §5.3 timers run on the same clock as everything else in the rig.
+  const pending: { at: number; fn: () => void; live: boolean }[] = [];
+  const timers: ChannelTimers = {
+    after(delay, fn) {
+      const t = { at: ms + delay, fn, live: true };
+      pending.push(t);
+      return () => { t.live = false; };
+    },
+  };
+  const fire = () => {
+    for (;;) {
+      const due = pending.filter((t) => t.live && t.at <= ms).sort((a, b) => a.at - b.at)[0];
+      if (!due) return;
+      due.live = false;
+      due.fn();
+    }
+  };
   const loop = startCallLoop({
     request: request(),
     log,
@@ -87,10 +113,12 @@ function rig(over: { navMode?: 'dtmf' | 'speech' } = {}) {
     navMode: over.navMode ?? 'dtmf',
     networkProfile: 'TELEPHONY',
     nowMs: () => ms,
+    epochMs: () => 1_000_000 + ms,
+    timers,
   });
   return {
     loop, log, tp, ts,
-    advance: (by: number) => { ms += by; },
+    advance: (by: number) => { ms += by; fire(); },
     /** Feeds `n` frames of the given audio, advancing the clock as the wire would. */
     feed(frame: () => Uint8Array, n: number) {
       for (let i = 0; i < n; i++) {
@@ -456,6 +484,164 @@ describe('over the loopback transport, with real audio', () => {
 
     assert.ok(loop.gate.holdSuspected || loop.gate.channel === 'HOLD', 'the acoustic layer was heard');
     assert.equal(tp.intent, 'closed', 'and the gate followed it to the transport');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5.3's producers, through the loop — a call that moves by itself
+// ---------------------------------------------------------------------------
+
+describe('a call reaches a person without anyone setting the channel (§5.3)', () => {
+  const HUMAN_LINES = ['okay, I can see the member right here', 'and I have the request open now, so what did you need'];
+
+  test('dial → IVR → HUMAN, and the phase follows in the same handler', async () => {
+    const r = rig();
+    assert.equal(r.loop.gate.channel, 'DIALING');
+    assert.equal(await r.loop.dial('ws://payer', PROFILES.TELEPHONY), true);
+    assert.equal(r.loop.gate.channel, 'IVR');
+    assert.equal(r.tp.intent, 'dtmf_only', 'the menu can be navigated: the gate reached the transport');
+
+    r.ts.say(HUMAN_LINES[0]!, 1000);
+    assert.equal(r.loop.gate.channel, 'IVR', 'N=2, not N=1');
+    r.ts.say(HUMAN_LINES[1]!, 4000);
+    assert.equal(r.loop.gate.channel, 'HUMAN');
+    assert.equal(r.loop.phase.state.phase, 'EXCHANGE');
+    assert.equal(r.tp.intent, 'open');
+
+    // Atomic: nothing between the channel entering HUMAN and the phase leaving
+    // NOT_STARTED, or HUMAN/NOT_STARTED would be a position someone could act in.
+    const k = r.kinds();
+    const at = k.lastIndexOf('channel.changed');
+    assert.equal(k[at + 1], 'phase.changed');
+  });
+
+  test('the most common path of all: IVR → HOLD → HUMAN, a queue answered', async () => {
+    const r = rig();
+    await r.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    // 'please hold while…' is menu language by design (§6.2): a queue usually
+    // reaches HOLD on the music. This announcement carries a listed cue.
+    r.ts.say('your call is important to us, please stay on the line', 500);
+    r.advance(HOLD_CONFIRM_MS);
+    assert.equal(r.loop.gate.channel, 'HOLD', 'a cue and three seconds of nothing');
+    r.advance(60_000);
+    r.ts.say(HUMAN_LINES[0]!, 64_000);
+    r.ts.say(HUMAN_LINES[1]!, 67_000);
+    assert.equal(r.loop.gate.channel, 'HUMAN');
+    assert.equal(r.loop.phase.state.phase, 'EXCHANGE', 'not left in HUMAN/NOT_STARTED (§5.3)');
+    assert.equal(r.tp.intent, 'open');
+  });
+
+  test('a person answering the menu while suspicion stands widens the gate once, not twice', async () => {
+    // The channel must move BEFORE the controller clears suspicion. The other
+    // order clears first — the gate reopens to IVR's dtmf_only — and then opens
+    // it again for HUMAN: two changes, one of them to a position nobody is in.
+    const r = rig();
+    await r.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    r.ts.say('your call is important to us, please stay on the line', 500);
+    assert.equal(r.tp.intent, 'closed');
+    r.ts.say(HUMAN_LINES[0]!, 1500);
+    r.ts.say(HUMAN_LINES[1]!, 2500);
+    const widenings = r.log.events().filter((e) => e.t === 'gate.changed' && e.from === 'closed').map((e) => e.t === 'gate.changed' && e.to);
+    assert.deepEqual(widenings, ['dtmf_only', 'open'], 'DIALING → IVR, then straight to open');
+  });
+
+  test('a refused link closes the call, and dial says so rather than throwing', async () => {
+    const r = rig();
+    r.tp.refuseDial('ECONNREFUSED');
+    assert.equal(await r.loop.dial('ws://payer', PROFILES.TELEPHONY), false);
+    assert.equal(r.loop.gate.channel, 'CLOSED');
+    assert.equal(r.loop.phase.state.phase, 'DONE');
+  });
+
+  test('the far end hanging up closes the call wherever it was, and the phase goes to DONE', async () => {
+    const r = rig();
+    await r.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    r.ts.say(HUMAN_LINES[0]!, 1000);
+    r.ts.say(HUMAN_LINES[1]!, 4000);
+    r.tp.close('far_end_hangup');
+    assert.equal(r.loop.gate.channel, 'CLOSED');
+    assert.equal(r.loop.phase.state.phase, 'DONE');
+    assert.equal(r.tp.intent, 'closed');
+  });
+});
+
+describe('who has been told, and for how long they waited (ADR-017)', () => {
+  const DISCLOSE = "Hi, I'm an AI assistant calling on behalf of Clinic.";
+
+  test('a transfer resets the disclosure — the tracker follows the channel', () => {
+    const r = rig();
+    r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    r.loop.disclosure.onAgentTurn(DISCLOSE);
+    assert.equal(r.loop.disclosure.disclosedToCurrentParty, true);
+    r.loop.channels.onNotifyTransfer(1);
+    assert.equal(r.loop.gate.channel, 'TRANSFER');
+    assert.equal(r.loop.disclosure.disclosedToCurrentParty, false, 'the next person has not been told');
+    assert.ok(r.kinds().includes('party.changed'));
+  });
+
+  test('the hold segment is measured from SUSPICION, not from the channel reaching HOLD', () => {
+    // The two differ by HOLD_CONFIRM_MS here, and by up to twenty seconds on
+    // the acoustic path — against a five-second continuity threshold.
+    const r = rig();
+    r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    r.ts.say('one moment please', 0);
+    r.advance(HOLD_CONFIRM_MS);
+    assert.equal(r.loop.gate.channel, 'HOLD');
+    r.advance(1_500);
+    r.ts.say('okay, I can see the member right here', 4_500);
+    r.ts.say('and I have the request open now, so what did you need', 4_500);
+    assert.equal(r.loop.gate.channel, 'HUMAN');
+    assert.equal(r.loop.lastHoldSegmentMs, HOLD_CONFIRM_MS + 1_500);
+  });
+
+  test('the Call snapshot reads each field from the part that owns it', async () => {
+    const r = rig();
+    await r.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    let c = r.loop.snapshot();
+    assert.equal(c.channel, 'IVR');
+    assert.equal(c.phase, 'NOT_STARTED');
+    assert.equal(c.id, 'CALL-L');
+    r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    assert.equal(r.loop.snapshot().disclosedToCurrentParty, false);
+    r.loop.disclosure.onAgentTurn(DISCLOSE);
+    r.loop.phase.onToolAccepted('capture_auth_number', { value: 'A472-91' });
+    c = r.loop.snapshot();
+    assert.equal(c.phase, 'READBACK');
+    assert.equal(c.capturedAuthNumber, 'A472-91', 'READBACK.txt renders it; a snapshot without it throws there');
+    assert.equal(c.disclosedToCurrentParty, true);
+    assert.equal(c.disclosuresDelivered, 1);
+  });
+});
+
+describe('HOLD_CUE + HOLD_CONFIRM_MS, through the loop', () => {
+  test('a filler cue while the representative keeps talking never leaves HUMAN', () => {
+    const r = rig();
+    r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    r.ts.partial('let me check that for you', 0);
+    for (let t = 500; t <= 3_500; t += 500) {
+      r.advance(500);
+      r.ts.partial('let me check that for you, so the member', t);
+    }
+    assert.equal(r.loop.gate.channel, 'HUMAN');
+  });
+
+  test('"one moment", then nothing: HOLD three seconds after the last word', () => {
+    const r = rig();
+    r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    r.ts.say('one moment please', 0);
+    r.advance(HOLD_CONFIRM_MS - 1);
+    assert.equal(r.loop.gate.channel, 'HUMAN');
+    r.advance(1);
+    assert.equal(r.loop.gate.channel, 'HOLD');
+  });
+
+  test('stop() cancels the timers with everything else', () => {
+    const r = rig();
+    r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    r.ts.say('one moment please', 0);
+    r.loop.stop();
+    r.advance(HOLD_CONFIRM_MS * 2);
+    assert.equal(r.loop.gate.channel, 'HUMAN');
   });
 });
 

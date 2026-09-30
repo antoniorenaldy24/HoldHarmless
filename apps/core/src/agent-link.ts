@@ -11,19 +11,22 @@
  *   session  ──text───►  semantic layer     (deltas, and turn ends: the latch, §6.8)
  *   session  ──events─►  interruption       (§3's two remaining clear triggers)
  *   gate     ──state──►  session guard      (ADR-022: read at every createReply)
+ *   position ──update─►  session            (prompt + policy per position — step 3)
+ *   agent    ──turns──►  disclosure tracker (§7.6: set by observation only)
  *
- * What this does NOT do yet: configure the session per position (prompts,
- * policy, tools) — step 3 — or handle tools and the phase machine — step 4. A
- * call wired with this alone hears and speaks, under the gate, and does not yet
- * know what to say.
+ * What this does NOT do yet: handle tools — step 4 — or close the call — step
+ * 5. A call wired with this knows what to say at every position and hears and
+ * speaks under the gate; it cannot yet act on what it hears.
  */
 
-import type { ReplyGuardState } from '@holdharmless/agent';
+import type { ReplyGuardState, SessionConfig } from '@holdharmless/agent';
+import type { ChannelTimers } from '@holdharmless/callmodel';
 import type { CallTransport } from '@holdharmless/transport';
 import type { AuthRequest, NavMode, NetworkProfileName } from '@holdharmless/events';
 import { createAudioBridge, type AudioBridge, type AudioBridgeOptions } from './audio-bridge.js';
 import { startCallLoop, type CallLoop, type TranscriptSource } from './call.js';
 import type { EventLog } from './log.js';
+import { createConfigurator, type Configurator } from './position-config.js';
 
 /**
  * The part of `AgentSession` this file uses, and nothing more. Structural, so a
@@ -38,6 +41,8 @@ export interface AgentMedia {
   onReplyAudio(f: (bytes: Uint8Array) => void): void;
   onReplyStarted(f: () => void): void;
   onReplyDone(f: (status: 'completed' | 'interrupted') => void): void;
+  /** Mutable fields only; resolves on session.updated (§7.1). */
+  update(config: Partial<SessionConfig>): Promise<void>;
 }
 
 /**
@@ -74,13 +79,20 @@ export type CallDeps = {
    */
   createSession: (guard: () => ReplyGuardState) => AgentMedia;
   nowMs?: () => number;
+  epochMs?: () => number;
+  timers?: ChannelTimers;
   bridge?: Omit<AudioBridgeOptions, 'transport'>;
+  /** A session.update the server refused. The call carries on; this must be seen. */
+  onFault?: (err: unknown) => void;
+  /** Where the configurator's coalesced work runs; `queueMicrotask` by default. */
+  defer?: (fn: () => void) => void;
 };
 
 export interface Call {
   readonly loop: CallLoop;
   readonly bridge: AudioBridge;
   readonly session: AgentMedia;
+  readonly configurator: Configurator;
   stop(): void;
 }
 
@@ -105,12 +117,35 @@ export function startCall(deps: CallDeps): Call {
     navMode: deps.navMode,
     networkProfile: deps.networkProfile,
     nowMs,
+    ...(deps.epochMs ? { epochMs: deps.epochMs } : {}),
+    ...(deps.timers ? { timers: deps.timers } : {}),
     // §4: the bridge must flush before the transport hears of a narrowing.
     gateTarget: bridge,
   });
   const live = loop;
 
   let stopped = false;
+
+  // Step 3: the session is brought to every settled position. What moves the
+  // position is in the log — channel and phase changes — and so is what changes
+  // the prompt without moving it: a disclosure heard, a party reset.
+  const configurator = createConfigurator({
+    session,
+    log: deps.log,
+    read: () => ({
+      call: live.snapshot(),
+      request: deps.request,
+      navMode: deps.navMode,
+      disclosure: live.disclosure,
+      holdSegmentMs: live.lastHoldSegmentMs,
+    }),
+    onFault: deps.onFault ?? ((err) => console.error('[call] session.update refused:', err)),
+    ...(deps.defer ? { defer: deps.defer } : {}),
+  });
+  const unsubscribe = deps.log.subscribe((e) => {
+    if (e.t === 'channel.changed') configurator.request(e.from);
+    else if (e.t === 'phase.changed' || e.t === 'disclosure.delivered' || e.t === 'party.changed') configurator.request();
+  });
 
   // The agent hears EVERYTHING the far end sends, whatever the gate says. The
   // gate governs what the agent may SAY; muting what it hears would leave it
@@ -156,14 +191,21 @@ export function startCall(deps: CallDeps): Call {
       redactable: true,
       isClosing,
     });
+    // §7.6: disclosedToCurrentParty becomes true when the agent SAID it, never
+    // because a prompt told it to. The tracker logs disclosure.delivered, and
+    // that reconfigures the session without DISCLOSURE.txt.
+    live.disclosure.onAgentTurn(text);
   });
 
   return {
     loop: live,
     bridge,
     session,
+    configurator,
     stop(): void {
       stopped = true;
+      unsubscribe();
+      configurator.stop();
       live.stop();
       bridge.stop();
     },

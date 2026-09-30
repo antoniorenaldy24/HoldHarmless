@@ -199,6 +199,13 @@ export function runTrial(cue: string, opts: TrialOptions = {}): Trial {
   }
   if (!closed) turnsToReopen = 0;
 
+  // The trial is synchronous, so HOLD_CONFIRM_MS (§5.3) never fires inside
+  // it: it measures the semantic path alone, one delta per turn. Stopping the
+  // loop cancels the timer rather than leaving it to fire on a finished call.
+  // What the timer does to a cue is tested where time is modeled, in
+  // apps/core/test/call.test.ts.
+  loop.stop();
+
   const winners = log.events()
     .filter((e) => e.t === 'semantic.observed')
     .map((e) => (e.t === 'semantic.observed' ? `${e.obs.winner}${e.obs.accepted ? '' : '?'}` : ''));

@@ -15,3 +15,4 @@ export * from './metrics.js';
 export * from './call.js';
 export * from './audio-bridge.js';
 export * from './agent-link.js';
+export * from './position-config.js';

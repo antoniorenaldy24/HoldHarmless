@@ -234,7 +234,14 @@ export class FfmpegMicrophone implements MicrophoneSource {
       const frame = joined.slice(off, off + BYTES_PER_FRAME);
       off += BYTES_PER_FRAME;
       if (this.firstFrameAt === null) {
-        this.firstFrameAt = arrivedAt;
+        // Snapped to 1/1024 ms, so that `firstFrameAt + n * FRAME_MS` and the
+        // differences between them are EXACT in binary floating point, which
+        // is what "exactly FRAME_MS apart" promises. Anchored on a raw clock
+        // reading, a difference came out as 19.999999999999943 about one run
+        // in three, and a test comparing spacing failed intermittently. The
+        // snap moves the anchor by under a microsecond, far inside the
+        // unknown constant offset this timeline already carries.
+        this.firstFrameAt = Math.round(arrivedAt * 1024) / 1024;
         this.startupLatencyMsValue = arrivedAt - this.openedAt;
         wasFirst = true;
       }

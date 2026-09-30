@@ -10,9 +10,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { BYTES_PER_FRAME, MULAW_SILENCE } from '@holdharmless/audio';
-import type { ReplyGuardState } from '@holdharmless/agent';
+import type { ReplyGuardState, SessionConfig } from '@holdharmless/agent';
+import { HOLD_CONFIRM_MS, PARTY_CONTINUITY_MS, type ChannelTimers } from '@holdharmless/callmodel';
 import type { AuthRequest, GateIntent } from '@holdharmless/events';
-import { gateAdmits, type AudioSource, type CallTransport } from '@holdharmless/transport';
+import { PROFILES, gateAdmits, type AudioSource, type CallTransport } from '@holdharmless/transport';
 import { createEventLog, startCall, type AgentMedia, type BridgeScheduler } from '../src/index.js';
 
 const request: AuthRequest = {
@@ -25,6 +26,7 @@ const request: AuthRequest = {
 /** Every surface of the session the media path uses, driven by the test. */
 class FakeSession implements AgentMedia {
   heard: Uint8Array[] = [];
+  updates: Partial<SessionConfig>[] = [];
   private h = {
     delta: [] as ((t: string) => void)[],
     turn: [] as ((s: 'agent' | 'far_end', t: string, c: boolean) => void)[],
@@ -46,6 +48,9 @@ class FakeSession implements AgentMedia {
   onReplyAudio(f: (b: Uint8Array) => void): void { this.h.audio.push(f); }
   onReplyStarted(f: () => void): void { this.h.started.push(f); }
   onReplyDone(f: (s: 'completed' | 'interrupted') => void): void { this.h.done.push(f); }
+  update(cfg: Partial<SessionConfig>): Promise<void> { this.updates.push(cfg); return Promise.resolve(); }
+  /** What the session holds now: every update applied in order. */
+  get config(): Partial<SessionConfig> { return Object.assign({}, ...this.updates); }
 
   // --- what the server would do -------------------------------------------
   farEndSays(text: string): void {
@@ -91,7 +96,30 @@ function manualTime() {
   let now = 0;
   let fn: (() => void) | null = null;
   const scheduler: BridgeScheduler = { every(f) { fn = f; return () => { if (fn === f) fn = null; }; } };
-  return { now: () => now, scheduler, advance(ms: number) { now += ms; fn?.(); } };
+  // The §5.3 timers, on the same clock.
+  const pending: { at: number; f: () => void; live: boolean }[] = [];
+  const timers: ChannelTimers = {
+    after(ms, f) {
+      const t = { at: now + ms, f, live: true };
+      pending.push(t);
+      return () => { t.live = false; };
+    },
+  };
+  return {
+    now: () => now,
+    scheduler,
+    timers,
+    advance(ms: number) {
+      now += ms;
+      fn?.();
+      for (;;) {
+        const due = pending.filter((t) => t.live && t.at <= now).sort((a, b) => a.at - b.at)[0];
+        if (!due) break;
+        due.live = false;
+        due.f();
+      }
+    },
+  };
 }
 
 function rig() {
@@ -103,6 +131,8 @@ function rig() {
     request, log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
     createSession: (guard) => (session = new FakeSession(guard)),
     nowMs: clock.now,
+    epochMs: () => 1_000_000 + clock.now(),
+    timers: clock.timers,
     bridge: { now: clock.now, scheduler: clock.scheduler },
   });
   const human = () => call.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
@@ -246,5 +276,94 @@ describe('stop()', () => {
     r.clock.advance(1000);
     assert.equal(r.tp.sent.length, 0);
     assert.equal(r.session.heard.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 3: the session is told what each position is
+// ---------------------------------------------------------------------------
+
+const toolsOf = (c: Partial<SessionConfig>) => (c.tools ?? []).map((t) => t.name);
+const HUMAN_LINES = ['okay, I can see the member right here', 'and I have the request open now, so what did you need'];
+
+describe('per-position configuration reaches the session (§5.6, §7.3)', () => {
+  test('dialed: the menu prompt and send_dtmf; a person answers: the exchange, with the disclosure', async () => {
+    const r = rig();
+    await r.call.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    await r.call.configurator.idle();
+    assert.deepEqual(toolsOf(r.session.config), ['send_dtmf']);
+    assert.equal(r.session.config.interruptResponse, false);
+
+    r.session.farEndSays(HUMAN_LINES[0]!);
+    r.session.farEndSays(HUMAN_LINES[1]!);
+    await r.call.configurator.idle();
+    assert.equal(r.call.loop.gate.channel, 'HUMAN', 'nobody set the channel by hand');
+    assert.ok(toolsOf(r.session.config).includes('capture_auth_number'));
+    assert.equal(r.session.config.interruptResponse, true);
+    const loaded = r.log.events().filter((e) => e.t === 'prompt.loaded');
+    assert.deepEqual(loaded.map((e) => e.t === 'prompt.loaded' && e.files), [['IVR_DTMF.txt'], ['EXCHANGE.txt', 'DISCLOSURE.txt']]);
+  });
+
+  test('the disclosure is dropped when the agent SAID it — and not before', async () => {
+    const r = rig();
+    r.human();
+    await r.call.configurator.idle();
+    r.session.agentTurn('Hello, I am calling about a prior authorization.');
+    await r.call.configurator.idle();
+    assert.equal(r.call.loop.disclosure.disclosedToCurrentParty, false, 'no disclosure phrase, no disclosure');
+    r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+    await r.call.configurator.idle();
+    assert.equal(r.call.loop.disclosure.disclosedToCurrentParty, true);
+    const last = r.log.events().filter((e) => e.t === 'prompt.loaded').at(-1)!;
+    assert.ok(last.t === 'prompt.loaded' && last.files.join() === 'EXCHANGE.txt');
+  });
+
+  test('back from a hold long enough for a person to change: the party hedge', async () => {
+    const r = rig();
+    r.human();
+    r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+    r.session.farEndSays('one moment please');
+    r.clock.advance(HOLD_CONFIRM_MS);
+    assert.equal(r.call.loop.gate.channel, 'HOLD');
+    await r.call.configurator.idle();
+    assert.deepEqual(toolsOf(r.session.config), [], 'no tools on hold');
+
+    r.clock.advance(PARTY_CONTINUITY_MS * 4);
+    r.session.farEndSays(HUMAN_LINES[0]!);
+    r.session.farEndSays(HUMAN_LINES[1]!);
+    await r.call.configurator.idle();
+    assert.equal(r.call.loop.gate.channel, 'HUMAN');
+    const last = r.log.events().filter((e) => e.t === 'prompt.loaded').at(-1)!;
+    assert.ok(last.t === 'prompt.loaded' && last.hedged, 'a different person may have come back');
+    assert.ok(r.call.loop.lastHoldSegmentMs >= PARTY_CONTINUITY_MS * 4, 'measured from suspicion, not from the channel change');
+  });
+
+  test('stop() lets go of the log — a call that has ended holds no subscription', () => {
+    const tp = fakeTransport();
+    const clock = manualTime();
+    const log = createEventLog({ callId: 'CALL-S' });
+    const real = log.subscribe.bind(log);
+    let live = 0;
+    log.subscribe = (h) => {
+      live++;
+      const off = real(h);
+      return () => { live--; off(); };
+    };
+    const call = startCall({
+      request, log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
+      createSession: (guard) => new FakeSession(guard),
+      nowMs: clock.now, timers: clock.timers, bridge: { now: clock.now, scheduler: clock.scheduler },
+    });
+    assert.equal(live, 1);
+    call.stop();
+    assert.equal(live, 0, 'a work queue running many calls would otherwise keep every one of them alive');
+  });
+
+  test('stop() ends the configuration with everything else', async () => {
+    const r = rig();
+    r.call.stop();
+    r.call.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+    await r.call.configurator.idle();
+    assert.equal(r.session.updates.length, 0);
   });
 });

@@ -45,6 +45,11 @@
  *    menu opening read HUMAN. So `noteAgentSpoke` fires on `HUMAN` and
  *    `TRANSFER` and never while navigating an IVR.
  *
+ * 5. THE CHANNEL MOVES BY ITS OWN PRODUCERS (§5.3), and the phase follows in
+ *    the same handler. Until module 4.0's reply half only `* → HOLD` had a
+ *    producer; a real call sat in DIALING with the gate shut. `channel.ts` in
+ *    callmodel is the rest of the table, wired here.
+ *
  * WHAT THIS DOES NOT DO YET, stated rather than implied: it does not drive the
  * Work Queue, redial, or the closing sequence, and it does not load prompts or
  * push per-position session updates. Those are the reply half; this is the
@@ -55,9 +60,20 @@
 
 import { BYTES_PER_FRAME, FRAME_MS, muLaw } from '@holdharmless/audio';
 import { createAcousticClassifier, createSemanticClassifier } from '@holdharmless/classifier';
-import { createGateController, type GateController, type GateTarget } from '@holdharmless/callmodel';
-import type { AuthRequest, Channel, NavMode, NetworkProfileName } from '@holdharmless/events';
-import type { CallTransport } from '@holdharmless/transport';
+import {
+  createChannelDriver,
+  createDisclosureTracker,
+  createGateController,
+  createPhaseMachine,
+  type ChannelDriver,
+  type ChannelTimers,
+  type DisclosureTracker,
+  type GateController,
+  type GateTarget,
+  type PhaseMachine,
+} from '@holdharmless/callmodel';
+import type { AuthRequest, Call, CallEventBody, Channel, NavMode, NetworkProfileName } from '@holdharmless/events';
+import type { CallTransport, NetworkProfile } from '@holdharmless/transport';
 import type { EventLog } from './log.js';
 
 /**
@@ -110,6 +126,16 @@ export type CallLoopDeps = {
    * that if it is the thing the controller calls.
    */
   gateTarget?: GateTarget;
+  /**
+   * The §5.3 timers (HOLD_CONFIRM_MS, HOLD_TIMEOUT_MS, TRANSFER_TIMEOUT_MS).
+   * Real timers by default; a test or a replay passes its own clock.
+   */
+  timers?: ChannelTimers;
+  /**
+   * Epoch milliseconds, for `holdSuspectedAt` — which is epoch by contract
+   * (§9.3, `hold.suspected.atMs`), unlike `nowMs`, which is call-relative.
+   */
+  epochMs?: () => number;
   /** Overridable for tests; the classifiers are otherwise built here. */
   acoustic?: ReturnType<typeof createAcousticClassifier>;
   semantic?: ReturnType<typeof createSemanticClassifier>;
@@ -117,6 +143,39 @@ export type CallLoopDeps = {
 
 export interface CallLoop {
   readonly gate: GateController;
+  /**
+   * The phase dimension (§5.4). Moved here by exactly two things: the channel
+   * entering HUMAN or CLOSED — applied in the same handler as the
+   * channel.changed that caused it (§5.3's atomic follow-ups) — and whatever
+   * the caller hands it: tools, reply.done, the phase timeout.
+   */
+  readonly phase: PhaseMachine;
+  /** §5.3's producers the gate controller does not own. */
+  readonly channels: ChannelDriver;
+  /**
+   * Who has been told (ADR-017, ADR-018). Follows every channel change in the
+   * same handler, so a party reset is in force before anything can be said to
+   * the new party; the caller reports the agent's turns to it.
+   */
+  readonly disclosure: DisclosureTracker;
+  /**
+   * The hold segment that most recently ENDED, in ms, measured from the moment
+   * suspicion began rather than from the confirmed channel change (ADR-017) —
+   * the latter would under-report by the confirmation delay, up to twenty
+   * seconds on the acoustic path, against a five-second threshold.
+   */
+  readonly lastHoldSegmentMs: number;
+  /**
+   * The call as §12.1's `Call`, assembled from the parts that own each field.
+   * A snapshot, never stored: every field has exactly one owner, and a stored
+   * copy would be a second.
+   */
+  snapshot(): Call;
+  /**
+   * Dials, and produces `DIALING → IVR` or `DIALING → CLOSED` from the result.
+   * Resolves either way; a refused link is a call outcome, not an exception.
+   */
+  dial(endpoint: string, profile: NetworkProfile): Promise<boolean>;
   /**
    * Frames PUSHED TO THE ACOUSTIC LAYER — not frames received.
    *
@@ -152,11 +211,57 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
   // The controller owns the transport (ADR-007). Every event it produces is
   // written here, in the order it produced them, and nothing else writes a
   // gate.changed or a channel.changed.
+  const epochMs = deps.epochMs ?? Date.now;
+  const startedAt = new Date(epochMs()).toISOString();
+  const phase = createPhaseMachine({ emit: (body) => deps.log.append(body) });
+  const disclosure = createDisclosureTracker({ emit: (body) => deps.log.append(body) });
+  let channels: ChannelDriver | null = null;
+  let gateRef: GateController | null = null;
+
+  // A hold SEGMENT spans consecutive HOLD and TRANSFER channels, and starts
+  // when suspicion began — which the controller still holds at the moment it
+  // emits the channel change into HOLD, and clears only after.
+  let segmentStartedAt: number | undefined;
+  let lastHoldSegmentMs = 0;
+  const holdLike = (c: Channel) => c === 'HOLD' || c === 'TRANSFER';
+  const followSegment = (from: Channel, to: Channel): void => {
+    if (holdLike(to) && segmentStartedAt === undefined) segmentStartedAt = gateRef?.holdSuspectedAt ?? epochMs();
+    if (holdLike(from) && !holdLike(to) && segmentStartedAt !== undefined) {
+      lastHoldSegmentMs = epochMs() - segmentStartedAt;
+      segmentStartedAt = undefined;
+    }
+  };
+
+  /**
+   * What the controller produced, in its order. Two things follow a
+   * channel.changed, and both in THIS handler, before control returns:
+   *
+   *   1. §5.3's atomic follow-ups — entering HUMAN while NOT_STARTED moves the
+   *      phase to EXCHANGE, entering CLOSED moves it to DONE. Done anywhere
+   *      later, HUMAN/NOT_STARTED would be a resting state: no policy, no
+   *      tools, no prompt, and `positionalPromptName` throws on it.
+   *   2. the channel timers, which start and stop with the channel.
+   */
+  const onController = (body: CallEventBody): void => {
+    deps.log.append(body);
+    if (body.t === 'channel.changed') {
+      phase.onChannelChange(body.to);
+      followSegment(body.from, body.to);
+      // ADR-017's reset list, with the segment that just ended.
+      disclosure.onChannelChange(body.from, body.to, lastHoldSegmentMs);
+    }
+    channels?.onControllerEvent(body);
+  };
+
   const gate = createGateController({
     navMode: deps.navMode,
     transport: deps.gateTarget ?? deps.transport,
-    emit: (body) => deps.log.append(body),
+    emit: onController,
+    ...(deps.epochMs ? { now: deps.epochMs } : {}),
   });
+  gateRef = gate;
+  const driver = createChannelDriver({ gate, ...(deps.timers ? { timers: deps.timers } : {}) });
+  channels = driver;
 
   let framesObserved = 0;
   let stopped = false;
@@ -175,10 +280,22 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
 
   deps.transcripts.onFarEndDelta((text, atMs) => {
     if (stopped) return;
+    // Any word from the far end, classified or not, is the far end speaking:
+    // HOLD_CONFIRM_MS counts three seconds of silence after a cue, not three
+    // seconds after it (see channel.ts).
+    driver.onFarEndSpeech();
     const observation = semantic.push(text, atMs);
     if (!observation) return;
     deps.log.append({ t: 'semantic.observed', obs: observation });
+    // The channel first: a person answering while suspicion stands moves the
+    // channel, and then the controller clears suspicion — one widening, not two.
+    driver.onSemantic(observation);
     gate.onSemantic(observation);
+  });
+
+  deps.transport.onClosed((cause) => {
+    if (stopped) return;
+    driver.transportClosed(cause);
   });
 
   deps.transcripts.onFarEndTurnEnd((text, atMs) => {
@@ -200,6 +317,55 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
 
   return {
     gate,
+    phase,
+    channels: driver,
+    disclosure,
+    get lastHoldSegmentMs() {
+      return lastHoldSegmentMs;
+    },
+    snapshot(): Call {
+      const p = phase.state;
+      return {
+        id: deps.log.callId,
+        requestId: deps.request.id,
+        transport: 'loopback',
+        navMode: deps.navMode,
+        networkProfile: deps.networkProfile,
+        startedAt,
+        channel: gate.channel,
+        phase: p.phase,
+        ...(p.closingKind ? { closingKind: p.closingKind } : {}),
+        holdSuspected: gate.holdSuspected,
+        ...(gate.holdSuspectedAt !== undefined ? { holdSuspectedAt: gate.holdSuspectedAt } : {}),
+        holdDurationMs: gate.holdDurationMs(),
+        humanChannelMs: p.humanChannelMs,
+        disclosedToCurrentParty: disclosure.disclosedToCurrentParty,
+        partiesDetected: disclosure.partiesDetected,
+        disclosuresDelivered: disclosure.disclosuresDelivered,
+        ...(p.capturedAuthNumber !== undefined ? { capturedAuthNumber: p.capturedAuthNumber } : {}),
+        readbackAttempts: p.readbackAttempts,
+        outcomeWritten: p.outcomeWritten,
+        // Owned by parts not wired into the loop yet — silence recovery, the
+        // tool layer, session recovery, billing (steps 4 and 5). Reported as
+        // their starting values, not invented, and none is read by a prompt.
+        cumulativeHoldMs: 0,
+        rePromptCounts: {},
+        holdRampSteps: 0,
+        pendingContextCorrection: false,
+        discardedToolResults: [],
+        billableSessionMs: 0,
+      };
+    },
+    async dial(endpoint: string, profile: NetworkProfile): Promise<boolean> {
+      try {
+        await deps.transport.dial(endpoint, profile);
+      } catch (err) {
+        driver.linkFailed(`link_refused: ${err instanceof Error ? err.message : String(err)}`);
+        return false;
+      }
+      driver.linkEstablished();
+      return true;
+    },
     get framesObserved() {
       return framesObserved;
     },
@@ -215,6 +381,7 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
 
     stop(): void {
       stopped = true;
+      driver.stop();
     },
   };
 }
