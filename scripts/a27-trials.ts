@@ -127,7 +127,45 @@ export type Trial = {
 export const TYPICAL_TURN_MS = 3_696;
 export const SHORTEST_TURN_MS = 1_872;
 
-export function runTrial(cue: string): Trial {
+/**
+ * §6.6's Block B, verbatim from `docs/recording-script.md`: twenty cue phrases
+ * that a hold DOES follow. The honest half of the pair; Block C above is the
+ * filler half. Kept beside it because the defect that made a hold cue lose to
+ * `responsiveness` (2026-09-30) was only visible with both in hand.
+ */
+export const CUE_WITH_HOLD: readonly string[] = [
+  'One moment.',
+  'One moment please, let me look that up.',
+  'Okay, let me put you on hold for just a second.',
+  'Can you hold for me?',
+  'Bear with me.',
+  'Hold on.',
+  'Hang on, I need to check something.',
+  'Let me check.',
+  'Give me a second.',
+  'Just a moment.',
+  'Let me pull that up.',
+  "I'll be right back.",
+  "Stay on the line, I'm going to look into this.",
+  'Let me transfer you.',
+  "I'm going to transfer you to utilization management. Please hold.",
+  'Connecting you now.',
+  'Let me get someone else who can help with that.',
+  'Okay… one moment.',
+  'Alright, let me check on that.',
+  'Oh, hold on, let me get that for you.',
+];
+
+export type TrialOptions = {
+  /**
+   * The agent spoke just before the representative's cue — the ORDINARY case,
+   * since "one moment" is usually said in reply to the agent. Until 2026-09-30
+   * no trial had it, which is how a cue losing to `responsiveness` went unseen.
+   */
+  agentSpokeFirst?: boolean;
+};
+
+export function runTrial(cue: string, opts: TrialOptions = {}): Trial {
   const tp = recordingTransport();
   const ts = scriptedTranscripts();
   const log = createEventLog({ callId: `A27-${cue.slice(0, 8)}` });
@@ -140,7 +178,12 @@ export function runTrial(cue: string): Trial {
   // §6.3's cost is paid from. A cue in any other position mutes nobody.
   loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'a27' });
 
-  atMs += TYPICAL_TURN_MS;
+  if (opts.agentSpokeFirst) {
+    // The agent finishes its request; the representative answers a second later.
+    atMs += TYPICAL_TURN_MS;
+    loop.noteAgentSpoke();
+  }
+  atMs += opts.agentSpokeFirst ? 1_000 : TYPICAL_TURN_MS;
   ts.turn(cue, atMs);
   const closed = loop.gate.gate === 'closed';
 

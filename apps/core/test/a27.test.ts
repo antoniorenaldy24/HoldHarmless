@@ -18,10 +18,33 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { A27_MAX_TURNS_TO_REOPEN, CUE_WITHOUT_HOLD, runTrial } from '../../../scripts/a27-trials.js';
+import { A27_MAX_TURNS_TO_REOPEN, CUE_WITH_HOLD, CUE_WITHOUT_HOLD, runTrial } from '../../../scripts/a27-trials.js';
+
+describe('a hold cue is decisive even when it answers the agent (§6.2, fixed 2026-09-30)', () => {
+  // The ordinary case: the agent asks for something and the representative
+  // replies "one moment". With the agent having just spoken, `responsiveness`
+  // joins the vote and pulls toward HUMAN; before the fix that cost the cue its
+  // margin, and only 4 of these 20 honest hold announcements were accepted —
+  // four holds in five unannounced to the gate, and a silent one never caught.
+  // No earlier test had an agent speaking before a cue, which is how it hid.
+  for (const [label, corpus] of [['a hold follows (Block B)', CUE_WITH_HOLD], ['filler (Block C)', CUE_WITHOUT_HOLD]] as const) {
+    test(`every cue closes the gate after the agent has spoken — ${label}`, () => {
+      assert.equal(corpus.length, 20);
+      const missed = corpus.map((c) => runTrial(c, { agentSpokeFirst: true })).filter((t) => !t.closed).map((t) => t.cue);
+      assert.deepEqual(missed, [], 'a listed cue, spoken in reply to the agent, did not close the gate');
+    });
+  }
+
+  test('and the structural bar holds in that case too — two turns, no more', () => {
+    const late = CUE_WITHOUT_HOLD
+      .map((c) => runTrial(c, { agentSpokeFirst: true }))
+      .filter((t) => t.turnsToReopen === null || t.turnsToReopen > A27_MAX_TURNS_TO_REOPEN);
+    assert.deepEqual(late.map((t) => t.cue), []);
+  });
+});
 
 describe('A-27 (structural): a cue spoken without a hold costs at most two turns', () => {
-  const trials = CUE_WITHOUT_HOLD.map(runTrial);
+  const trials = CUE_WITHOUT_HOLD.map((c) => runTrial(c));
 
   test('the corpus is the twenty utterances §6.6 asks for', () => {
     assert.equal(CUE_WITHOUT_HOLD.length, 20);

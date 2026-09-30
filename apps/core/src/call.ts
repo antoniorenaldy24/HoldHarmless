@@ -55,7 +55,7 @@
 
 import { BYTES_PER_FRAME, FRAME_MS, muLaw } from '@holdharmless/audio';
 import { createAcousticClassifier, createSemanticClassifier } from '@holdharmless/classifier';
-import { createGateController, type GateController } from '@holdharmless/callmodel';
+import { createGateController, type GateController, type GateTarget } from '@holdharmless/callmodel';
 import type { AuthRequest, Channel, NavMode, NetworkProfileName } from '@holdharmless/events';
 import type { CallTransport } from '@holdharmless/transport';
 import type { EventLog } from './log.js';
@@ -103,6 +103,13 @@ export type CallLoopDeps = {
   networkProfile: NetworkProfileName;
   /** Milliseconds since the call began. Injected so a replay can drive it. */
   nowMs?: () => number;
+  /**
+   * What the gate controller drives. The transport by default; the Audio Bridge
+   * once the reply half is wired, because the bridge must flush its own pacing
+   * buffer BEFORE the transport hears of a narrowing (§4) — and it can only do
+   * that if it is the thing the controller calls.
+   */
+  gateTarget?: GateTarget;
   /** Overridable for tests; the classifiers are otherwise built here. */
   acoustic?: ReturnType<typeof createAcousticClassifier>;
   semantic?: ReturnType<typeof createSemanticClassifier>;
@@ -147,7 +154,7 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
   // gate.changed or a channel.changed.
   const gate = createGateController({
     navMode: deps.navMode,
-    transport: deps.transport,
+    transport: deps.gateTarget ?? deps.transport,
     emit: (body) => deps.log.append(body),
   });
 

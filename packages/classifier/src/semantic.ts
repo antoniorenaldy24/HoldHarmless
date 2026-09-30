@@ -255,14 +255,41 @@ export function createSemanticClassifier(options: SemanticOptions = {}): Semanti
       const minWeight = effectiveMinWeight();
       // Two bars, not one: enough evidence, and enough more than the next class.
       // Without the margin a 0.46/0.45 split would be reported as a decision.
-      const accepted = scores[top] >= minWeight && scores[top] - scores[runnerUp] >= margin;
+      const voted = scores[top] >= minWeight && scores[top] - scores[runnerUp] >= margin;
+
+      // A MATCHED HOLD CUE IS DECISIVE — as §6.2 and the weight table above have
+      // always said, and as the mechanism did not deliver until 2026-09-30.
+      //
+      // A weight of 1.0 renormalized with the others is not decisive: it is a
+      // majority vote. Once the agent has spoken, responsiveness (0.30) joins
+      // the count, pulls toward HUMAN, and the cue's share falls to about 0.54
+      // against 0.39 — short of the 0.15 margin, so the observation read
+      // UNKNOWN. Measured on §6.6's twenty honest hold announcements (Block B):
+      // 20/20 accepted with no agent speech before them, 4/20 when the agent
+      // had spoken one to three seconds earlier. That second case is the
+      // ordinary one — a representative says "one moment" IN REPLY to the
+      // agent — so four holds in five went unannounced to the gate, and a
+      // silent one would never have been caught at all (§6.3: the cue exists
+      // for exactly the holds the acoustic layer handles worst).
+      //
+      // Every earlier measurement missed it because none had an agent speaking:
+      // module 2.2's calibration and A-27's trials both ran without one. The
+      // media path's own test found it, by wiring a reply before a cue.
+      //
+      // The other signals are still computed and reported in `scores`; they are
+      // evidence about the utterance, and a disagreement is worth seeing. They
+      // just cannot outvote a phrase that §6.3 lists, which is what "decisive"
+      // means and what §6.5's "set holdSuspected on HOLD_CUE at N=1" assumes.
+      const decisive = cue !== null;
+      const accepted = decisive || voted;
+      const winner: SemanticClass | 'UNKNOWN' = decisive ? 'HOLD_CUE' : voted ? top : 'UNKNOWN';
 
       return {
         at: now().toISOString(),
         seq: 0, // assigned by the core (§3.3 rule 4)
         scores: { ...scores },
-        winner: accepted ? top : 'UNKNOWN',
-        confidence: scores[top],
+        winner,
+        confidence: decisive ? scores.HOLD_CUE : scores[top],
         effectiveMinWeight: minWeight,
         signalsAvailable: available,
         sourceDelta: delta,

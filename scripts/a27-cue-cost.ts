@@ -29,7 +29,7 @@
 import { p90 } from '@holdharmless/core';
 import { A27_MAX_TURNS_TO_REOPEN, CUE_WITHOUT_HOLD, SHORTEST_TURN_MS, TYPICAL_TURN_MS, runTrial } from './a27-trials.js';
 
-const trials = CUE_WITHOUT_HOLD.map(runTrial);
+const trials = CUE_WITHOUT_HOLD.map((c) => runTrial(c));
 
 console.log('A-27, upper bound: §6.3s list against perfect transcripts');
 console.log('Twenty cue phrases with the representative carrying straight on.\n');
