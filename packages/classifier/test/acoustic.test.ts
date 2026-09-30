@@ -18,6 +18,7 @@ import { SAMPLE_RATE, muLaw } from '@holdharmless/audio';
 import { ASSET_DIR, LINES, LINE_IDS, MANIFEST, holdMusicPcm, lineFile, type LineId } from '@holdharmless/ivr-harness';
 import {
   ACOUSTIC_MARGIN,
+  PAUSE_RAMP,
   EMIT_INTERVAL_MS,
   createAcousticClassifier,
   voteAutocorrelation,
@@ -133,14 +134,26 @@ describe('the three classes', () => {
 });
 
 describe('the provisional tier (§21 2.1: within 1.5 s of hold onset)', () => {
-  test('hold audio starting after a conversation is called PERIODIC within 1.5 s', () => {
+  test('hold audio after a conversation is called PERIODIC, and no slower than §6.7 accepted', () => {
+    // §21 2.1 asks for 1.5 s. This test asserted exactly that until 2026-09-30,
+    // when the project owner moved the pause ramp from 0.10-0.30 to 0.02-0.06
+    // (§6.7) on the evidence of their own voice: the old ramp muted the agent
+    // on 16 of 93 human takes, the new one on none, and each mute costs two
+    // turns of silence. The price, stated before the decision was taken, is
+    // hold-onset speed. On THIS stand-in it is 1750 ms — 250 ms past 1.5 s.
+    // After a human voice it is 1500 ms, on the bar; after rendered speech it
+    // is 2250, where the old ramp was already at 2000 and failing too.
+    //
+    // So this pins a REGRESSION bound, not the §21 requirement, and says so:
+    // the requirement is recorded as not met on non-human audio (§21 2.1).
+    // Getting slower than the accepted operating point fails here.
     const c = createAcousticClassifier();
     feed(c, syntheticSpeech(30), 30); // a conversation first: every window is full of speech
     const after = feed(c, MUSIC, 4, { startMs: 30_000 });
     const firstPeriodic = after.findIndex((o) => o.winner === 'PERIODIC');
     assert.ok(firstPeriodic >= 0, 'hold audio was never called PERIODIC');
     const ms = (firstPeriodic + 1) * EMIT_INTERVAL_MS;
-    assert.ok(ms <= 1500, `PERIODIC after ${ms} ms of hold audio`);
+    assert.ok(ms <= 1750, `PERIODIC after ${ms} ms of hold audio; §6.7 accepted 1750 on this stand-in`);
   });
 
   test('that first PERIODIC is provisional: the 20 s window is still full of the conversation', () => {
@@ -212,6 +225,19 @@ describe('UNKNOWN rather than a guess (§6.4)', () => {
 });
 
 describe('the signal votes, at the measured values', () => {
+  test('§6.7 as decided: the lowest pause ratio any speech has measured draws NO periodic vote', () => {
+    // 0.060 is the floor of every speech population measured: 364 windows of
+    // the owner's own voice and 166 of rendered speech, over the 2 s window
+    // this classifier reads. Hold music is 0.000 at every window. The old ramp
+    // (0.10-0.30) gave 0.060 a FULL periodic vote, which is how 16 of 93 human
+    // turns muted the agent; 0.02-0.06 gives it none. Reverting the ramp fails
+    // here, in CI, without needing a recording or a rendered asset.
+    assert.deepEqual([...PAUSE_RAMP], [0.02, 0.06]);
+    assert.equal(votePauseRatio(0.060).PERIODIC, 0, 'the human floor must not vote hold');
+    assert.equal(votePauseRatio(0.0).PERIODIC, 1, 'and hold music must still vote it fully');
+    assert.ok(votePauseRatio(0.27).SPEECH_LIKE > 0.9, 'the human median is plainly speech');
+  });
+
   test('pause ratio: hold music 0.00 votes PERIODIC, speech 0.42 votes SPEECH_LIKE', () => {
     assert.ok(votePauseRatio(0.0).PERIODIC > 0.9);
     assert.ok(votePauseRatio(0.42).SPEECH_LIKE > 0.9);
@@ -277,11 +303,14 @@ describe('against the rendered assets', () => {
     assert.ok(with_ <= without / 2, `${with_} of 23 lines still misfire against ${without} without the margin`);
   });
 
-  test('the margin is the largest one that keeps the provisional tier under 1.5 s', { skip: rendered ? false : 'assets not rendered; the sweep needs them' }, () => {
-    // ACOUSTIC_MARGIN is chosen as the last value on the free part of the curve.
-    // If a later edit raises it, hold detection slows past §21 2.1 and that has
-    // to be an argued decision, not a tidy-up that made it match the semantic
-    // layer's 0.15. One step up is enough to prove the edge is real.
+  test('the margin costs nothing: hold onset is what it would be with no margin at all', { skip: rendered ? false : 'assets not rendered; the sweep needs them' }, () => {
+    // ACOUSTIC_MARGIN sits on the FREE part of the curve. Under the 0.02-0.06
+    // ramp that part runs from 0 to 0.08 — identical onset, identical mutes —
+    // and 0.10 is where onset starts to rise (`pnpm mic-check --sweep`). So the
+    // property to pin is no longer "one step up breaks 1.5 s", which stopped
+    // being true when §6.7 moved the ramp; it is that the margin buys its
+    // protection without slowing hold detection at all. Raising it into the
+    // costly part of the curve is a trade, and a trade needs a decision.
     const onset = (margin: number): number => {
       const c = createAcousticClassifier({ margin });
       feed(c, syntheticSpeech(30), 30);
@@ -289,7 +318,7 @@ describe('against the rendered assets', () => {
       const i = after.findIndex((o) => o.winner === 'PERIODIC');
       return i < 0 ? Infinity : (i + 1) * EMIT_INTERVAL_MS;
     };
-    assert.ok(onset(ACOUSTIC_MARGIN) <= 1500, `at ${ACOUSTIC_MARGIN} the provisional tier takes ${onset(ACOUSTIC_MARGIN)} ms`);
-    assert.ok(onset(ACOUSTIC_MARGIN + 0.01) > 1500, 'the chosen margin is no longer at the edge of the free range — re-sweep it');
+    assert.equal(onset(ACOUSTIC_MARGIN), onset(0), 'the margin slowed hold detection');
+    assert.ok(onset(0.15) > onset(ACOUSTIC_MARGIN), 'the costly part of the curve is where the sweep says it is');
   });
 });

@@ -82,41 +82,41 @@ export const CONFIRM_AUTOCORRELATION = 0.30;
  * `holdSuspected` on ONE provisional PERIODIC, so the gate closed and the agent
  * went mute while the far end was still talking.
  *
- * The value is swept against every criterion this layer has at once: false
- * closures on the 23 rendered representative lines, the provisional tier's
- * 1.5 s requirement (§21 2.1) on hold audio following a conversation, and the
- * three class assertions that already existed. Audio is the classifier tests'
- * own — the generated hold music and their synthetic speech, so a number here
- * and a number in a test mean the same thing:
+ * HOW THE VALUE WAS CHOSEN, and why it survived the ramp moving under it.
  *
- *     margin   false closures        hold onset   speech over music
- *     0.00     22/23 lines, 42 obs   1250 ms      PERIODIC   <- as built
- *     0.02     10/23, 20 obs         1250 ms      PERIODIC
- *     0.04      9/23, 15 obs         1250 ms      PERIODIC
- *     0.05      9/23, 15 obs         1250 ms      PERIODIC   <- chosen
- *     0.06      9/23, 15 obs         1750 ms      PERIODIC   <- §21 2.1 breaks here
- *     0.08      9/23, 15 obs         1750 ms      PERIODIC
- *     0.10      8/23, 13 obs         2000 ms      UNKNOWN
- *     0.15      6/23, 11 obs         2000 ms      UNKNOWN    <- CLASSIFIER_MARGIN
- *     0.20      5/23, 10 obs         2000 ms      UNKNOWN
+ * It is taken from the FREE part of the curve: the largest margin that cuts
+ * false closures without slowing hold detection at all. That is not an
+ * operating-point decision — there is nothing to trade on the free part — and
+ * it is why the margin is chosen here rather than put to the owner.
  *
- * 0.05 is the largest value that costs nothing. Everything up to it cuts false
- * closures with hold onset unchanged at 1250 ms and every documented class
- * verdict intact; 0.06 is where the trade begins. So this is not the operating
- * point decision — it is the part of the curve where there is no decision to
- * make, and taking it is not a choice between criteria.
+ * The curve moved once. Swept first under the old pause ramp (0.10-0.30), the
+ * free part ran from 0 to 0.05 and 0.06 was where onset started to rise. The
+ * owner then moved the ramp to 0.02-0.06 (§6.7, 2026-09-30), and re-swept on
+ * the classifier tests' own audio (`pnpm mic-check --sweep`) the curve is:
  *
- * (An earlier sweep here read 1500 ms and named 0.08. It used a speech
- * generator written for the sweep rather than the tests', and the tests caught
- * it. The table above is from the tests' own audio.)
+ *     margin   rendered lines muting   hold onset
+ *     0.00     22/23                   1750 ms     <- the tie problem above
+ *     0.02      1/23                   1750 ms
+ *     0.05      1/23                   1750 ms     <- chosen, unchanged
+ *     0.08      1/23                   1750 ms
+ *     0.10      1/23                   2000 ms     <- the trade starts here
+ *     0.15      0/23                   2000 ms     <- CLASSIFIER_MARGIN
  *
- * THE DECISION THAT REMAINS is the 9 lines out of 23 that still mute the agent
- * mid-sentence; `votePauseRatio` holds the numbers and §6.7 holds the rule that
- * the operating point is the owner's. §6.7 also names the way out — "better
- * signals, not a lower threshold" — and the obvious candidate was PROBED AND
- * FAILED: requiring two signals to vote PERIODIC, rather than letting one carry
- * a weighted majority, gives 9/23 and 1250 ms, exactly what the margin alone
- * already gives. It buys nothing here, so it is not offered as an answer.
+ * The free part now runs from 0.02 to 0.08, and 0.05 is inside it, so it did
+ * not move. Raising it to 0.15 would clear the last rendered line at 250 ms of
+ * onset — a trade, so a decision — and the line in question is
+ * `rep1_hold_cue`, "One moment please, let me look that up": a hold cue, on
+ * which the semantic layer closes the gate anyway. Its acoustic mute costs
+ * nothing a correct call would not already pay.
+ *
+ * (Two corrections kept visible. An early sweep read 1500 ms and named 0.08,
+ * because it used a speech generator written for the sweep rather than the
+ * tests'. And §6.7 once said the gap ramp took rendered mutes to zero; that
+ * was measured at a margin of 0.15.)
+ *
+ * §6.7's own escape — "better signals, not a lower threshold" — was PROBED AND
+ * FAILED here: requiring two signals to vote PERIODIC, rather than letting one
+ * carry a weighted majority, bought exactly what the margin already bought.
  */
 export const ACOUSTIC_MARGIN = 0.05;
 
@@ -125,7 +125,7 @@ export type AcousticOptions = {
   minWeight?: number;
   /** How far the winner must lead the runner-up. `ACOUSTIC_MARGIN` by default. */
   margin?: number;
-  /** `PAUSE_RAMP` by default. For measuring §6.7's alternative, not for adopting it. */
+  /** `PAUSE_RAMP` by default. Exists so an alternative can be MEASURED; changing the default is §6.7's decision. */
   pauseRamp?: readonly [number, number];
   /** Injectable for deterministic tests. */
   now?: () => Date;
@@ -160,61 +160,49 @@ export function voteRms(rms: number): Vote {
  *
  * A named constant and an option rather than two literals, because §6.7 leaves
  * its value to the project owner and the evidence for that choice has to be
- * producible by a tool (`pnpm mic-check --sweep`) rather than by editing this
- * file and re-running. The default is the value in force; the option exists so
- * the alternative can be MEASURED, not so it can be quietly adopted.
+ * producible by a tool (`pnpm human-calibration`, section 5) rather than by
+ * editing this file and re-running.
+ *
+ * DECIDED 2026-09-30 by the project owner: 0.02-0.06, replacing 0.10-0.30, on
+ * the evidence of their own voice. `votePauseRatio` carries why.
  */
-export const PAUSE_RAMP: readonly [periodicAt: number, speechAt: number] = [0.10, 0.30];
+export const PAUSE_RAMP: readonly [periodicAt: number, speechAt: number] = [0.02, 0.06];
 
 export function votePauseRatio(ratio: number, rampAt: readonly [number, number] = PAUSE_RAMP): Vote {
-  // Measured: hold music 0.00, DTMF 0.26, speech 0.40-0.46, silence 1.00 —
-  // and the speech figure there is a WHOLE-CLIP average, which is not what this
-  // function is ever given. Re-measured in module 4.1 over the 2 s sliding
-  // window the classifier actually reads, at 250 ms intervals, on frames that
-  // contain speech, across every rendered asset (343 windows):
+  // What the ramp separates, measured over the 2 s sliding window this
+  // classifier actually reads, on frames that contain speech:
   //
-  //     speech       min 0.060   p05 0.140   median 0.340   p75 0.446
-  //     hold music   0.000 at all 27 windows — exactly zero, every time
+  //     the owner's voice   min 0.060   median 0.290   (364 windows, 93 takes)
+  //     rendered speech     min 0.060   median 0.360   (166 windows)
+  //     hold music          0.000 at every window
   //
-  // The two populations do not overlap: nothing at all lies between 0.000 and
-  // 0.060. The ramp below (0.10 to 0.30) sits INSIDE the speech population —
-  // 40.8% of speech windows draw a partial PERIODIC vote and 1.7% a full one.
-  // Measured consequence, with the margin rule in place: 6 of 23 rendered
-  // representative lines are classified PERIODIC mid-sentence, and §6.5 sets
-  // `holdSuspected` on one such observation, so the gate closes and the agent
-  // goes mute while the far end is still talking.
+  // The populations never meet: nothing lies between 0.000 and 0.060. §6.1's
+  // recorded "speech 0.40-0.46" is a WHOLE-CLIP average, which this function
+  // is never given, and the old ramp (0.10-0.30) was set against it — so it
+  // sat inside the speech population and voted hold on ordinary sentences.
   //
-  // THE RAMP IS NOT MOVED HERE, AND THAT IS DELIBERATE. Moving it to 0.01-0.05,
-  // into the empty gap, takes all six false closures to zero — and breaks the
-  // provisional tier's 1.5 s requirement (§21 2.1), because after a
-  // conversation the first 2 s window of hold music is still part speech and no
-  // longer clears the lower bar. Both were measured. This is §6.7's shape
-  // exactly — "one lever, two opposing criteria" — and §6.7's own rule applies:
-  // "The operating point is a written decision, not an emergent one." So it is
-  // left to the project owner, with both numbers on the table:
+  // WHY 0.02-0.06 (decided by the project owner, 2026-09-30, §6.7). On a human
+  // voice the old ramp muted the agent on 16 of 93 takes and this one on none
+  // (8 of 68 when the decision was taken; the rest of the takes arrived after).
+  // Each mute costs two far-end turns of silence, because provisional
+  // suspicion clears only on two HUMAN observations — the same mechanism A-27
+  // prices at about 5.8 s on this voice. What was given up is hold-onset
+  // speed: after a human conversation 1500 ms rather than 750, after rendered
+  // speech 2250 rather than 2000 — and the old ramp was ALREADY past §21 2.1's
+  // 1.5 s there, so the trade costs 250 ms in a column both options failed.
+  // The speed only matters for a hold announced by nobody: a spoken cue closes
+  // the gate semantically before the music starts.
   //
-  //     ramp 0.10-0.30 (this one)   6/23 lines mute the agent   hold onset ≤1.5 s
-  //     ramp 0.01-0.05              0/23                        hold onset >1.5 s
+  // The rejected alternatives and why: 0.01-0.05 also mutes none but takes
+  // onset after a human voice to 2000 ms; 0.05-0.10 is 250 ms faster but mutes
+  // 2 of 93; raising the margin instead slows onset (ACOUSTIC_MARGIN); making
+  // two signals agree was probed and bought nothing.
   //
-  // STALE, and kept so the correction is visible: both rows were measured at
-  // a margin of 0.15, before ACOUSTIC_MARGIN became 0.05. Under the margin in
-  // force they are 9/23 and 1/23. And on the owner's own recordings (§6.7,
-  // `pnpm human-calibration`) the in-force ramp mutes 8 of 68 human clips,
-  // 0.02-0.06 mutes none, and the in-force ramp misses 1.5 s after a
-  // rendered conversation too (2000 ms) — the 1.5 s test passes only on a
-  // synthetic stand-in. The decision is still §6.7's owner's.
-  //
-  // §6.7 also names the way out of the trade: "If A-5 cannot be met at that
-  // value, the correct response is better signals, not a lower threshold." The
-  // candidate is in the same data — across all 23 lines, spectral flatness and
-  // autocorrelation stayed on the speech side of the gap at EVERY observation,
-  // and only pause ratio crossed. A PERIODIC that required two signals to agree
-  // rather than a weighted majority one signal can carry would take both
-  // criteria at once. That is a change to the voting scheme, not a threshold,
-  // and it belongs in its own module with its own measurement.
-  //
-  // Whichever is chosen, it is chosen on rendered audio until §6.6's recordings
-  // exist. `pnpm mic-check --file` re-runs all of it on a human voice.
+  // THE RISK THAT CAME WITH IT: 0.06 is exactly the floor of the one human
+  // voice measured. A speaker who pauses even less could fall under it, where
+  // this vote turns partial. Flatness and rms still vote speech and the margin
+  // still applies, so there is a cushion — but not from this signal. Re-run
+  // `pnpm human-calibration` on the next voice.
   const periodic = ramp(ratio, rampAt[0], rampAt[1]);
   const silence = Math.max(0, (ratio - 0.8) / 0.2);
   return vote(silence, periodic * (1 - silence), (1 - periodic) * (1 - silence));

@@ -251,5 +251,6 @@ for (const ramp of RAMPS) {
 }
 console.log('');
 
-console.log('LIMITS: one speaker; MP3, not WAV; read from a script; no second voice (Block E).');
+console.log('LIMITS: MP3, not WAV; read from a script. Block E is the second representative s lines;');
+console.log('        whether it is a genuinely different VOICE is not something this script can tell.');
 if (mutedClips > 0) process.exitCode = 1;
