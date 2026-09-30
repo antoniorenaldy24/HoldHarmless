@@ -50,18 +50,22 @@
  *    producer; a real call sat in DIALING with the gate shut. `channel.ts` in
  *    callmodel is the rest of the table, wired here.
  *
- * WHAT THIS DOES NOT DO YET, stated rather than implied: it does not drive the
- * Work Queue, redial, or the closing sequence, and it does not load prompts or
- * push per-position session updates. Those are the reply half; this is the
- * observation half — audio in, classifiers, suspicion, gate out — which is what
- * A-27 needs and what §6.8 named as missing. The reply half follows, and until
- * it lands nothing here should be read as "the system runs a call".
+ * 6. HUMAN TIME IS FED TO THE PHASE BACKSTOP (§5.4): once a second while a
+ *    person is on the line, the remainder on leaving. Nothing called
+ *    `addHumanTime` before step 4 of the reply half.
+ *
+ * WHAT THIS DOES NOT DO: talk to the agent. Prompts, the session's
+ * configuration and tools are wired in `agent-link.ts` and `tool-link.ts`,
+ * over this loop. Still missing at module level: the closing sequence and the
+ * hangup (step 5), silence recovery, the Work Queue driving calls, and redial —
+ * so nothing here yet amounts to "the system runs a call" end to end.
  */
 
 import { BYTES_PER_FRAME, FRAME_MS, muLaw } from '@holdharmless/audio';
 import { createAcousticClassifier, createSemanticClassifier } from '@holdharmless/classifier';
 import {
   createChannelDriver,
+  realTimers,
   createDisclosureTracker,
   createGateController,
   createPhaseMachine,
@@ -136,6 +140,12 @@ export type CallLoopDeps = {
    * (§9.3, `hold.suspected.atMs`), unlike `nowMs`, which is call-relative.
    */
   epochMs?: () => number;
+  /**
+   * The phase machine asks for the §8.6 procedure: a read-back limit, the
+   * read-back re-prompt limit, a phase timeout, or the model's own tool. The
+   * caller owns the escalation coordinator; this only reports the cause.
+   */
+  onEscalation?: (cause: 'readback_limit' | 'readback_reprompt' | 'phase_timeout' | 'tool') => void;
   /** Overridable for tests; the classifiers are otherwise built here. */
   acoustic?: ReturnType<typeof createAcousticClassifier>;
   semantic?: ReturnType<typeof createSemanticClassifier>;
@@ -213,7 +223,46 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
   // gate.changed or a channel.changed.
   const epochMs = deps.epochMs ?? Date.now;
   const startedAt = new Date(epochMs()).toISOString();
-  const phase = createPhaseMachine({ emit: (body) => deps.log.append(body) });
+  const phase = createPhaseMachine({
+    emit: (body) => deps.log.append(body),
+    ...(deps.onEscalation ? { onEscalation: deps.onEscalation } : {}),
+  });
+  const timers = deps.timers ?? realTimers;
+
+  /**
+   * §5.4's backstop runs on HUMAN time, so the loop feeds it: once a second
+   * while a person is on the line, and the remainder when the channel leaves
+   * HUMAN. A hold feeds nothing — the budget is spent talking, not waiting.
+   * Before this, `addHumanTime` had no caller, and a model that never called
+   * `capture_auth_number` would have kept the call in EXCHANGE indefinitely.
+   */
+  const HUMAN_TICK_MS = 1_000;
+  // Called only while the channel is HUMAN — by the tick, which is cancelled
+  // on leaving, and once on the way out — so `humanSince` is always the start
+  // of the current stretch when it is read, and needs no "not in HUMAN" value.
+  let humanSince = 0;
+  let cancelHumanTick: (() => void) | null = null;
+  const tickHuman = (): void => {
+    const t = nowMs();
+    phase.addHumanTime(t - humanSince);
+    humanSince = t;
+  };
+  const scheduleHumanTick = (): void => {
+    cancelHumanTick = timers.after(HUMAN_TICK_MS, () => {
+      tickHuman();
+      scheduleHumanTick();
+    });
+  };
+  const followHumanTime = (from: Channel, to: Channel): void => {
+    if (from === 'HUMAN') {
+      tickHuman();
+      cancelHumanTick?.();
+    }
+    if (to === 'HUMAN') {
+      humanSince = nowMs();
+      scheduleHumanTick();
+    }
+  };
   const disclosure = createDisclosureTracker({ emit: (body) => deps.log.append(body) });
   let channels: ChannelDriver | null = null;
   let gateRef: GateController | null = null;
@@ -245,6 +294,9 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
   const onController = (body: CallEventBody): void => {
     deps.log.append(body);
     if (body.t === 'channel.changed') {
+      // The HUMAN time the phase just spent is credited to THAT phase, before
+      // the channel change can move it (entering CLOSED moves it to DONE).
+      followHumanTime(body.from, body.to);
       phase.onChannelChange(body.to);
       followSegment(body.from, body.to);
       // ADR-017's reset list, with the segment that just ended.
@@ -260,7 +312,7 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
     ...(deps.epochMs ? { now: deps.epochMs } : {}),
   });
   gateRef = gate;
-  const driver = createChannelDriver({ gate, ...(deps.timers ? { timers: deps.timers } : {}) });
+  const driver = createChannelDriver({ gate, timers });
   channels = driver;
 
   let framesObserved = 0;
@@ -382,6 +434,7 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
     stop(): void {
       stopped = true;
       driver.stop();
+      cancelHumanTick?.();
     },
   };
 }

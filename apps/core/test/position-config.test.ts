@@ -230,6 +230,28 @@ describe('the configurator: one update per SETTLED position', () => {
     assert.ok(e[0]!.t === 'prompt.loaded' && e[0]!.files[0] === 'IVR_DTMF.txt');
   });
 
+  test('an update that moves only the policy loads no prompt', async () => {
+    // No row of today's §5.6 table shares a prompt with another and differs in
+    // policy, so the row is stated here: the same position, whose transcription
+    // mode is changed between two requests.
+    const s = fakeSession();
+    const log = createEventLog({ callId: 'CFG-P' });
+    let mode: 'balanced' | 'max_accuracy' = 'balanced';
+    const cfg = createConfigurator({
+      session: s.session, log, onFault: () => {},
+      read: () => inputs(call('HOLD', 'EXCHANGE')),
+      policyOf: () => ({ interruptResponse: false, transcriptionMode: mode, tools: [] }),
+    });
+    cfg.request();
+    await cfg.idle();
+    mode = 'max_accuracy';
+    cfg.request();
+    await cfg.idle();
+    assert.equal(s.updates.length, 2);
+    assert.deepEqual(Object.keys(s.updates[1]!), ['transcriptionMode'], 'the second carries the policy change only');
+    assert.equal(log.events().filter((e) => e.t === 'prompt.loaded').length, 1, 'and no second prompt.loaded: no prompt was loaded');
+  });
+
   test('a rejected update is surfaced, not recorded as sent, and retried by the next request', async () => {
     const r = configRig();
     r.s.hold();

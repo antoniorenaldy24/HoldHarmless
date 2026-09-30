@@ -185,7 +185,14 @@ export function createEscalationCoordinator(options: EscalationOptions): Escalat
         // The model answered, but not usably. Tier 2 applies now rather than
         // after another turn: the log would otherwise hold a summary that
         // INV-9 rejects, which is worse than none.
-        if (pendingCause) writeDeterministic(pendingCause);
+        //
+        // ALSO WHEN NOTHING WAS PENDING — the model escalated on its own, the
+        // ordinary path (§8.6's first of five). Until 2026-09-30 that case wrote
+        // nothing: the unusable summary was refused and no other took its
+        // place, so the escalation reached the dashboard with no summary at
+        // all — exactly the task INV-9 says nobody can act on. Every test began
+        // with `begin()`, so a cause was always pending.
+        writeDeterministic(pendingCause ?? 'escalate_to_human');
         return false;
       }
       options.emit({ t: 'escalation.summary', source: 'model', urgency, summary });

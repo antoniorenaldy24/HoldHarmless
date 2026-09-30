@@ -10,11 +10,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { BYTES_PER_FRAME, MULAW_SILENCE } from '@holdharmless/audio';
-import type { ReplyGuardState, SessionConfig } from '@holdharmless/agent';
+import type { ReplyCause, ReplyGuardState, SessionConfig } from '@holdharmless/agent';
 import { HOLD_CONFIRM_MS, PARTY_CONTINUITY_MS, type ChannelTimers } from '@holdharmless/callmodel';
-import type { AuthRequest, GateIntent } from '@holdharmless/events';
+import type { AuthRequest, GateIntent, ToolName } from '@holdharmless/events';
 import { PROFILES, gateAdmits, type AudioSource, type CallTransport } from '@holdharmless/transport';
-import { createEventLog, startCall, type AgentMedia, type BridgeScheduler } from '../src/index.js';
+import { createEventLog, createWorkQueue, startCall, type AgentMedia, type BridgeScheduler } from '../src/index.js';
 
 const request: AuthRequest = {
   id: 'R1', patientRef: 'p', memberId: 'm', patientDob: '1970-01-01',
@@ -51,6 +51,25 @@ class FakeSession implements AgentMedia {
   update(cfg: Partial<SessionConfig>): Promise<void> { this.updates.push(cfg); return Promise.resolve(); }
   /** What the session holds now: every update applied in order. */
   get config(): Partial<SessionConfig> { return Object.assign({}, ...this.updates); }
+
+  // --- tools ---------------------------------------------------------------
+  private toolHandlers: ((id: string, n: ToolName, a: unknown) => void)[] = [];
+  results: { callId: string; result: unknown; isError: boolean }[] = [];
+  replyRequests: { cause: ReplyCause; instructions?: string }[] = [];
+  /** When set, createReply refuses as the real session would. */
+  refuseReplies = false;
+  onToolCall(f: (id: string, n: ToolName, a: unknown) => void): void { this.toolHandlers.push(f); }
+  queueToolResult(callId: string, result: unknown, isError = false): void { this.results.push({ callId, result, isError }); }
+  createReply(cause: ReplyCause, instructions?: string): Promise<void> {
+    if (this.refuseReplies) return Promise.reject(new Error('reply_outstanding'));
+    this.replyRequests.push({ cause, ...(instructions !== undefined ? { instructions } : {}) });
+    return Promise.resolve();
+  }
+  /** The model calls a tool; returns the result the session would send back. */
+  callsTool(name: ToolName, args: unknown, callId = `c${this.results.length + 1}`) {
+    for (const f of this.toolHandlers) f(callId, name, args);
+    return this.results.find((r) => r.callId === callId)!;
+  }
 
   // --- what the server would do -------------------------------------------
   farEndSays(text: string): void {
@@ -122,13 +141,16 @@ function manualTime() {
   };
 }
 
-function rig() {
+function rig(over: Partial<AuthRequest> = {}) {
   const tp = fakeTransport();
   const clock = manualTime();
   const log = createEventLog({ callId: 'CALL-L' });
   let session!: FakeSession;
+  // A fresh record per call: tools write to it (lastReference, status).
+  const req: AuthRequest = { ...request, ...over };
+  const queue = createWorkQueue({ requests: [req], emit: (e) => log.append(e) });
   const call = startCall({
-    request, log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
+    request: req, queue, log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
     createSession: (guard) => (session = new FakeSession(guard)),
     nowMs: clock.now,
     epochMs: () => 1_000_000 + clock.now(),
@@ -136,7 +158,7 @@ function rig() {
     bridge: { now: clock.now, scheduler: clock.scheduler },
   });
   const human = () => call.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
-  return { tp, clock, log, call, session, human, kinds: () => log.events().map((e) => e.t) };
+  return { tp, clock, log, call, session, human, req, queue, kinds: () => log.events().map((e) => e.t) };
 }
 
 const speech = (frames: number) => new Uint8Array(frames * BYTES_PER_FRAME).fill(0x30);
@@ -350,7 +372,7 @@ describe('per-position configuration reaches the session (§5.6, §7.3)', () => 
       return () => { live--; off(); };
     };
     const call = startCall({
-      request, log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
+      request, queue: createWorkQueue({ requests: [{ ...request }] }), log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
       createSession: (guard) => new FakeSession(guard),
       nowMs: clock.now, timers: clock.timers, bridge: { now: clock.now, scheduler: clock.scheduler },
     });
@@ -365,5 +387,239 @@ describe('per-position configuration reaches the session (§5.6, §7.3)', () => 
     r.call.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
     await r.call.configurator.idle();
     assert.equal(r.session.updates.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 4: the model's tool calls reach the handlers, and their effects land
+// ---------------------------------------------------------------------------
+
+/** Dial, and let a representative answer — no channel set by hand. */
+async function atHuman(over: Partial<AuthRequest> = {}) {
+  const r = rig(over);
+  await r.call.loop.dial('ws://payer', PROFILES.TELEPHONY);
+  r.session.farEndSays(HUMAN_LINES[0]!);
+  r.session.farEndSays(HUMAN_LINES[1]!);
+  assert.equal(r.call.loop.gate.channel, 'HUMAN');
+  return r;
+}
+
+const GOOD_SUMMARY = 'Routine. Gave member ID and date of birth. They asked for the operative note. Clinical staff need to fax it and call back.';
+
+describe('tools reach the call (§8, module 4.0 step 4)', () => {
+  test('send_dtmf in the menu: tones go out through the bridge, and the model is told', async () => {
+    const r = rig();
+    await r.call.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    const res = r.session.callsTool('send_dtmf', { digits: '2', reason: 'prior authorization' });
+    assert.equal(res.isError, false);
+    assert.ok(r.kinds().includes('dtmf.sent'));
+    r.clock.advance(2_000);
+    assert.ok(r.tp.sent.some((s) => s.source === 'dtmf'), 'the tones reached the transport, through a dtmf_only gate');
+  });
+
+  test('a tool the position forbids is refused with a reason the model can act on — and nothing happens', async () => {
+    const r = rig();
+    await r.call.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    const res = r.session.callsTool('capture_auth_number', { value: 'A472-91' });
+    assert.equal(res.isError, true);
+    assert.match(JSON.stringify(res.result), /not available right now/);
+    assert.equal(r.call.loop.phase.state.phase, 'NOT_STARTED');
+    assert.ok(r.kinds().includes('tool.rejected'));
+  });
+
+  test('the whole exchange: capture → READBACK → confirmed → CLOSING, and the session follows each step', async () => {
+    const r = await atHuman();
+    r.session.farEndSays('the authorization number is A472-91');
+    assert.equal(r.session.callsTool('capture_auth_number', { value: 'A472-91' }).isError, false);
+    assert.equal(r.call.loop.phase.state.phase, 'READBACK');
+    await r.call.configurator.idle();
+    assert.ok(toolsOf(r.session.config).includes('confirm_readback'));
+    assert.ok(r.session.config.systemPrompt?.includes('A472-91'), 'READBACK.txt carries the captured number');
+    assert.equal(r.kinds().includes('auth_number.suspect'), false, 'it was said, so it is not suspect (§8.2)');
+
+    r.session.callsTool('confirm_readback', { matched: true });
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+    assert.equal(r.call.loop.phase.state.closingKind, 'wrapup');
+    await r.call.configurator.idle();
+    assert.ok(toolsOf(r.session.config).includes('record_outcome'));
+
+    const out = r.session.callsTool('record_outcome', { status: 'approved', auth_number: 'A472-91' });
+    assert.equal(out.isError, false);
+    assert.equal(r.queue.get('R1')!.status, 'approved');
+    assert.equal(r.call.loop.phase.state.outcomeWritten, true);
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING', 'recording the outcome does not end the call (ADR-015)');
+  });
+
+  test('a captured number the far end never said is flagged for review, not refused (§8.2)', async () => {
+    const r = await atHuman();
+    assert.equal(r.session.callsTool('capture_auth_number', { value: 'Z999-00' }).isError, false);
+    assert.ok(r.kinds().includes('auth_number.suspect'));
+    assert.equal(r.call.loop.phase.state.phase, 'READBACK');
+  });
+
+  test('an outcome carrying a different number than the one captured: refused AND a safety violation, same id', async () => {
+    const r = await atHuman();
+    r.session.farEndSays('it is A472-91');
+    r.session.callsTool('capture_auth_number', { value: 'A472-91' });
+    r.session.callsTool('confirm_readback', { matched: true });
+    const res = r.session.callsTool('record_outcome', { status: 'approved', auth_number: 'A472-19' }, 'bad-1');
+    assert.equal(res.isError, true);
+    const v = r.log.events().find((e) => e.t === 'safety.violation');
+    assert.ok(v && v.t === 'safety.violation' && v.kind === 'auth_number_mismatch' && v.toolCallId === 'bad-1');
+    assert.equal(r.queue.get('R1')!.status, 'in_progress', 'nothing was written');
+  });
+
+  test('capture_reference outlives the call: it lands on the request (A-16)', async () => {
+    const r = await atHuman();
+    r.session.callsTool('capture_reference', { reference: 'CR-2231', kind: 'call_reference' });
+    assert.equal(r.req.lastReference, 'CR-2231');
+  });
+
+  test('notify_transfer: gate shut on the announcement, channel TRANSFER, ONE new party', async () => {
+    const r = await atHuman();
+    r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+    r.session.callsTool('notify_transfer', { destination: 'utilization management' });
+    assert.equal(r.call.loop.gate.channel, 'TRANSFER');
+    assert.equal(r.tp.intent, 'closed');
+    const suspected = r.log.events().find((e) => e.t === 'hold.suspected');
+    assert.ok(suspected && suspected.t === 'hold.suspected' && suspected.trigger === 'notify_transfer', 'ADR-019');
+    assert.equal(r.log.events().filter((e) => e.t === 'party.changed').length, 1, 'told twice, the tracker counts a phantom party');
+    assert.equal(r.call.loop.disclosure.partiesDetected, 2);
+    assert.equal(r.call.loop.disclosure.disclosedToCurrentParty, false);
+  });
+});
+
+describe('escalation reaches a summary on every path (§8.6, INV-9)', () => {
+  const summaries = (r: ReturnType<typeof rig>) => r.log.events().filter((e) => e.t === 'escalation.summary');
+
+  test('the model escalates with a usable summary: CLOSING, and the model summary is kept', async () => {
+    const r = await atHuman();
+    r.session.callsTool('escalate_to_human', { reason: 'clinical question', context_summary: GOOD_SUMMARY });
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+    assert.equal(r.call.loop.phase.state.closingKind, 'escalation');
+    const s = summaries(r);
+    assert.equal(s.length, 1);
+    assert.ok(s[0]!.t === 'escalation.summary' && s[0]!.source === 'model');
+    assert.equal(r.session.replyRequests.length, 0, 'nobody asked the model to write what it had just written');
+  });
+
+  const failReadbackThrice = (r: ReturnType<typeof rig>) => {
+    for (let i = 0; i < 3; i++) {
+      if (r.call.loop.phase.state.phase === 'EXCHANGE') r.session.callsTool('capture_auth_number', { value: `A472-9${i}` });
+      r.session.callsTool('confirm_readback', { matched: false, corrected_value: `A47${i}-91` });
+    }
+    assert.equal(r.call.loop.phase.state.closingKind, 'escalation');
+  };
+
+  test('three failed read-backs: tier 1 waits for the reply CARRYING the tool call to end, then asks', async () => {
+    // Asked inside that reply, the session would refuse (a reply is active)
+    // and tier 2 would write every summary — tier 1 would never run at all.
+    const r = await atHuman();
+    failReadbackThrice(r);
+    assert.equal(r.session.replyRequests.length, 0, 'not while the model is still mid-reply');
+    r.session.replyDone('completed');
+    assert.equal(r.session.replyRequests.length, 1);
+    assert.equal(r.session.replyRequests[0]!.cause, 'escalation_instruction');
+    assert.equal(summaries(r).length, 0, 'that reply.done was not the turn tier 2 waits for');
+    r.session.replyDone('completed');
+    const s = summaries(r);
+    assert.equal(s.length, 1, 'a whole turn with no summary: tier 2 writes it');
+    assert.ok(s[0]!.t === 'escalation.summary' && s[0]!.source === 'deterministic');
+  });
+
+  test('…and the model answering tier 1 with a usable summary ends the procedure', async () => {
+    const r = await atHuman();
+    failReadbackThrice(r);
+    r.session.replyDone('completed');
+    r.session.callsTool('escalate_to_human', { reason: 'read-back failed', context_summary: GOOD_SUMMARY });
+    r.session.replyDone('completed');
+    const s = summaries(r);
+    assert.equal(s.length, 1);
+    assert.ok(s[0]!.t === 'escalation.summary' && s[0]!.source === 'model');
+  });
+
+  test('an escalation begun OUTSIDE a tool call asks at once — a timer is not inside anyone s reply', async () => {
+    // The read-back re-prompt limit (§5.7) is a silence timer: no reply is
+    // active when it fires, so there is nothing to wait for.
+    const r = await atHuman();
+    r.session.farEndSays('the number is A472-91');
+    r.session.callsTool('capture_auth_number', { value: 'A472-91' }); // a tool call came and went
+    r.call.loop.phase.onRecoveryLimit();
+    assert.equal(r.call.loop.phase.state.closingKind, 'escalation');
+    assert.equal(r.session.replyRequests.length, 1, 'asked now, not held for a reply.done that is not coming');
+  });
+
+  test('an interrupted reply is not the turn tier 2 waits for', async () => {
+    const r = await atHuman();
+    failReadbackThrice(r);
+    r.session.replyDone('completed'); // asks
+    r.session.replyDone('interrupted');
+    assert.equal(summaries(r).length, 0, 'the model did not get to finish');
+    r.session.replyDone('completed');
+    assert.equal(summaries(r).length, 1);
+  });
+
+  test('tier 1 refused by the session: tier 2 at once, not after a turn that will never come', async () => {
+    const r = await atHuman();
+    r.session.refuseReplies = true;
+    failReadbackThrice(r);
+    r.session.replyDone('completed');
+    await new Promise((res) => setImmediate(res));
+    assert.equal(summaries(r).length, 1);
+  });
+
+  test('the gate shut when the escalation begins: tier 2 at once, and the model is never asked', async () => {
+    const r = await atHuman();
+    r.session.farEndSays('the number is A472-90');
+    r.session.farEndSays('one moment please'); // suspected: the gate closes
+    assert.equal(r.tp.intent, 'closed');
+    failReadbackThrice(r);
+    assert.equal(summaries(r).length, 1);
+    assert.equal(r.session.replyRequests.length, 0);
+  });
+
+  test('the gate shut between the tool call and its reply ending: tier 2, never asked', async () => {
+    const r = await atHuman();
+    failReadbackThrice(r);
+    r.session.farEndSays('one moment please');
+    r.session.replyDone('completed');
+    assert.equal(r.session.replyRequests.length, 0, 'a reply requested now would be refused, or worse, spoken on hold');
+    assert.equal(summaries(r).length, 1);
+  });
+
+  test('the phase timeout, on HUMAN time: escalated with a deterministic summary, the model never asked', async () => {
+    const r = await atHuman();
+    r.clock.advance(480_000);
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+    assert.equal(r.call.loop.phase.state.closingKind, 'escalation');
+    const s = summaries(r);
+    assert.ok(s.length === 1 && s[0]!.t === 'escalation.summary' && s[0]!.source === 'deterministic');
+    assert.equal(r.session.replyRequests.length, 0, '§8.6: a timeout never asks the model');
+  });
+
+  test('…and a hold spends none of that budget', async () => {
+    const r = await atHuman();
+    r.clock.advance(400_000);
+    r.session.farEndSays('one moment please');
+    r.clock.advance(HOLD_CONFIRM_MS);
+    assert.equal(r.call.loop.gate.channel, 'HOLD');
+    r.clock.advance(300_000);
+    r.session.farEndSays(HUMAN_LINES[0]!);
+    r.session.farEndSays(HUMAN_LINES[1]!);
+    assert.equal(r.call.loop.gate.channel, 'HUMAN');
+    r.clock.advance(70_000);
+    assert.equal(r.call.loop.phase.state.phase, 'EXCHANGE', '400 + 3 + 70 s of HUMAN time is under 480');
+    r.clock.advance(10_000);
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+  });
+});
+
+describe('tools after stop()', () => {
+  test('a tool call on a stopped call gets no result and moves nothing', async () => {
+    const r = await atHuman();
+    r.call.stop();
+    r.session.callsTool('capture_auth_number', { value: 'A472-91' }, 'late');
+    assert.equal(r.session.results.length, 0);
+    assert.equal(r.call.loop.phase.state.phase, 'EXCHANGE');
   });
 });

@@ -165,6 +165,19 @@ describe('the three tiers (§8.6)', () => {
     assert.deepEqual(escalationSummaryProblems(summaries()[0]!.summary, 'Routine'), []);
   });
 
+  test('the model escalating ON ITS OWN with an unusable summary still leaves one (INV-9)', () => {
+    // The ordinary path: nobody called begin(), nothing was pending. Refusing
+    // the summary and writing nothing in its place left an escalation with no
+    // summary at all.
+    const { c, summaries } = coordinator();
+    assert.equal(c.pending, false);
+    assert.equal(c.onModelSummary('We should escalate this one.'), false);
+    assert.equal(summaries().length, 1);
+    assert.equal(summaries()[0]!.source, 'deterministic');
+    assert.ok(summaries()[0]!.summary.includes('beyond the approved clinical summary'), 'the cause is the model s own escalation');
+    assert.deepEqual(escalationSummaryProblems(summaries()[0]!.summary, 'Routine'), []);
+  });
+
   test('tier 3: a mismatch and a phase timeout never ask the model', () => {
     for (const cause of ALWAYS_DETERMINISTIC) {
       const { c, instructions, summaries } = coordinator();

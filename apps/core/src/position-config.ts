@@ -31,7 +31,7 @@
  * read it as what the agent is working from.
  */
 
-import { policyFor, positionId, type DisclosureTracker, type PositionPolicy } from '@holdharmless/callmodel';
+import { policyFor, positionId, type DisclosureTracker, type PositionId, type PositionPolicy } from '@holdharmless/callmodel';
 import type { SessionConfig, ToolDefinition } from '@holdharmless/agent';
 import type { AuthRequest, Call, Channel, NavMode, ToolName } from '@holdharmless/events';
 import { promptFor, type PromptBundle } from '@holdharmless/prompts';
@@ -70,9 +70,14 @@ export function toolDefinitions(names: readonly ToolName[]): ToolDefinition[] {
  * What the session should hold at this position. Pure: the same inputs give the
  * same configuration, which is what lets a test state it without a session.
  */
-export function positionConfig(inputs: PositionInputs, channelCameFrom?: Channel): PositionConfig {
+export function positionConfig(
+  inputs: PositionInputs,
+  channelCameFrom?: Channel,
+  /** §5.6's table. A parameter so a test can state a row the table does not have yet. */
+  policyOf: (id: PositionId) => PositionPolicy | undefined = policyFor,
+): PositionConfig {
   const { call } = inputs;
-  const policy = policyFor(positionId(call.channel, call.phase));
+  const policy = policyOf(positionId(call.channel, call.phase));
   const hedge = inputs.disclosure.promptInputs({
     channel: call.channel,
     ...(channelCameFrom ? { channelCameFrom } : {}),
@@ -115,6 +120,8 @@ export type ConfiguratorDeps = {
   onFault: (err: unknown) => void;
   /** Where coalesced work runs. `queueMicrotask` by default. */
   defer?: (fn: () => void) => void;
+  /** §5.6's table; `policyFor` by default. */
+  policyOf?: (id: PositionId) => PositionPolicy | undefined;
 };
 
 export interface Configurator {
@@ -142,7 +149,7 @@ export function createConfigurator(deps: ConfiguratorDeps): Configurator {
   const run = async (): Promise<void> => {
     const from = cameFrom;
     cameFrom = undefined;
-    const { bundle, config } = positionConfig(deps.read(), from);
+    const { bundle, config } = positionConfig(deps.read(), from, deps.policyOf);
 
     const diff: Partial<SessionConfig> = {};
     for (const [k, v] of Object.entries(config) as [keyof SessionConfig, unknown][]) {
@@ -160,10 +167,9 @@ export function createConfigurator(deps: ConfiguratorDeps): Configurator {
     updates++;
     // Logged once the session has ACCEPTED it: `prompt.loaded` is a claim
     // about what the agent is working from, and INV-6 reads it as one. Only
-    // when the prompt itself changed — under today's §5.6 table no two
-    // positions share a prompt and differ in policy, so the condition cannot
-    // yet be told apart from "on every update" by any test; it is kept for the
-    // day a row makes them differ.
+    // when the prompt itself changed: an update that moved only the policy
+    // loaded no prompt. Today's §5.6 table has no two positions that share a
+    // prompt and differ in policy, so the test states such a row itself.
     if (bundle && diff.systemPrompt !== undefined) {
       deps.log.append({
         t: 'prompt.loaded',

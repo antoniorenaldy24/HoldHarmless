@@ -84,6 +84,17 @@ export function createPhaseMachine(options: PhaseOptions = {}): PhaseMachine {
   let state = fresh();
   /** Set by a completed closing turn; half of CLOSING → DONE's condition. */
   let closingTurnComplete = false;
+  /**
+   * HUMAN time spent IN EACH PHASE — what each phase's budget is measured
+   * against. Until 2026-09-30 every budget was compared with `humanChannelMs`,
+   * the call's TOTAL: a call that spent more than three minutes in EXCHANGE —
+   * an ordinary exchange — would have been escalated by READBACK's 180-second
+   * budget on the first tick after the number was captured. Every test started
+   * its phase at zero, which is how it hid. Per phase, and kept across
+   * re-entries: a failed read-back returns to EXCHANGE with the EXCHANGE time
+   * already spent, so the backstop still bounds the whole exchange.
+   */
+  let spentIn: Partial<Record<Phase, number>> = {};
 
   const move = (to: Phase, producer: Producer, closingKind?: ClosingKind): void => {
     if (to === state.phase) return;
@@ -176,8 +187,10 @@ export function createPhaseMachine(options: PhaseOptions = {}): PhaseMachine {
 
     addHumanTime(ms: number): void {
       state.humanChannelMs += ms;
+      const spent = (spentIn[state.phase] ?? 0) + ms;
+      spentIn[state.phase] = spent;
       const limit = policyFor(positionId('HUMAN', state.phase))?.phaseTimeoutMs;
-      if (limit === undefined || state.humanChannelMs < limit) return;
+      if (limit === undefined || spent < limit) return;
       // The backstop: if the model never calls capture_auth_number, the call
       // does not sit in EXCHANGE forever. Escalation, deterministically
       // summarized, not a silent close (§5.4).
@@ -190,6 +203,7 @@ export function createPhaseMachine(options: PhaseOptions = {}): PhaseMachine {
     reset(): void {
       state = fresh();
       closingTurnComplete = false;
+      spentIn = {};
     },
   };
 }

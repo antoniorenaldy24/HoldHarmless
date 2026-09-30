@@ -27,13 +27,15 @@ import { createAudioBridge, type AudioBridge, type AudioBridgeOptions } from './
 import { startCallLoop, type CallLoop, type TranscriptSource } from './call.js';
 import type { EventLog } from './log.js';
 import { createConfigurator, type Configurator } from './position-config.js';
+import { connectTools, type AgentTools, type ToolLink } from './tool-link.js';
+import type { WorkQueue } from './work-queue.js';
 
 /**
  * The part of `AgentSession` this file uses, and nothing more. Structural, so a
  * test can stand in for the real session without a socket — and so it is visible
  * at a glance which of the session's surfaces the media path depends on.
  */
-export interface AgentMedia {
+export interface AgentMedia extends AgentTools {
   sendAudio(mulawFrame: Uint8Array): void;
   onTranscriptDelta(f: (text: string) => void): void;
   onTurn(f: (speaker: 'agent' | 'far_end', text: string, isClosing: boolean) => void): void;
@@ -67,6 +69,8 @@ export function sessionTranscripts(session: AgentMedia, nowMs: () => number): Tr
 
 export type CallDeps = {
   request: AuthRequest;
+  /** Where record_outcome writes (INV-18 is enforced there). Must hold `request`. */
+  queue: WorkQueue;
   log: EventLog;
   transport: CallTransport;
   navMode: NavMode;
@@ -93,8 +97,12 @@ export interface Call {
   readonly bridge: AudioBridge;
   readonly session: AgentMedia;
   readonly configurator: Configurator;
+  readonly tools: ToolLink;
   stop(): void;
 }
+
+/** How many completed far-end turns §8.2's sanity check looks back over. */
+const RECENT_FAR_END_TURNS = 3;
 
 export function startCall(deps: CallDeps): Call {
   const t0 = Date.now();
@@ -108,6 +116,9 @@ export function startCall(deps: CallDeps): Call {
   const guard = (): ReplyGuardState =>
     loop ? { gateIntent: loop.gate.gate, holdSuspected: loop.gate.holdSuspected } : { gateIntent: 'closed', holdSuspected: false };
   const session = deps.createSession(guard);
+  // The phase machine is built inside the loop and the coordinator after it;
+  // the escalation callback is bound once both exist.
+  let tools: ToolLink | null = null;
 
   loop = startCallLoop({
     request: deps.request,
@@ -121,10 +132,40 @@ export function startCall(deps: CallDeps): Call {
     ...(deps.timers ? { timers: deps.timers } : {}),
     // §4: the bridge must flush before the transport hears of a narrowing.
     gateTarget: bridge,
+    onEscalation: (cause) => tools?.onPhaseEscalation(cause),
   });
   const live = loop;
 
   let stopped = false;
+
+  // What the far end said lately: the turn in progress and the last few
+  // completed ones. A number is usually said a turn or two before the model
+  // gets round to capturing it.
+  const recentTurns: string[] = [];
+  let currentTurn = '';
+  session.onTranscriptDelta((text) => {
+    currentTurn = text;
+  });
+  session.onTurn((speaker, text) => {
+    if (speaker !== 'far_end') return;
+    recentTurns.push(text);
+    if (recentTurns.length > RECENT_FAR_END_TURNS) recentTurns.shift();
+    currentTurn = '';
+  });
+
+  // Step 4: the session's tool calls reach the handlers, and their effects
+  // reach the phase, the channel, the keypad and the escalation procedure.
+  const toolLink = connectTools({
+    session,
+    loop: live,
+    bridge,
+    log: deps.log,
+    request: deps.request,
+    queue: deps.queue,
+    farEndSpeech: () => [...recentTurns, currentTurn].join(' '),
+    now: nowMs,
+  });
+  tools = toolLink;
 
   // Step 3: the session is brought to every settled position. What moves the
   // position is in the log — channel and phase changes — and so is what changes
@@ -170,6 +211,7 @@ export function startCall(deps: CallDeps): Call {
     // a completed one's last partial frame must not be held back.
     if (status === 'interrupted') void bridge.interrupt();
     else bridge.finishReply();
+    toolLink.onReplyDone(status);
   });
 
   session.onSpeechStarted(() => {
@@ -202,10 +244,12 @@ export function startCall(deps: CallDeps): Call {
     bridge,
     session,
     configurator,
+    tools: toolLink,
     stop(): void {
       stopped = true;
       unsubscribe();
       configurator.stop();
+      toolLink.stop();
       live.stop();
       bridge.stop();
     },

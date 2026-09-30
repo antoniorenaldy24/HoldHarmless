@@ -164,6 +164,42 @@ describe('phase timeouts route to escalation (§5.4 backstop)', () => {
     assert.deepEqual(escalations, ['phase_timeout']);
   });
 
+  test('each phase is measured against ITS OWN time: a long exchange does not spend the read-back budget', () => {
+    // Four minutes of exchange — ordinary — then the number is captured.
+    // Measured against the call's total, READBACK's 180 s were already gone
+    // and the first tick escalated a call that had just succeeded.
+    const { m, escalations } = exchanging();
+    m.addHumanTime(240_000);
+    m.onToolAccepted('capture_auth_number', { value: 'A472-91' });
+    m.addHumanTime(1_000);
+    assert.equal(m.state.phase, 'READBACK');
+    assert.deepEqual(escalations, []);
+    assert.equal(m.state.humanChannelMs, 241_000, 'the total is still the total, for reporting');
+  });
+
+  test('…and a return to EXCHANGE after a failed read-back keeps the EXCHANGE time already spent', () => {
+    // Otherwise each failed read-back would buy another eight minutes, and the
+    // backstop would not bound the exchange at all.
+    const { m, escalations } = exchanging();
+    const limit = POSITION_POLICY[positionId('HUMAN', 'EXCHANGE')]!.phaseTimeoutMs!;
+    m.addHumanTime(limit - 1_000);
+    m.onToolAccepted('capture_auth_number', { value: 'A472-91' });
+    m.onToolAccepted('confirm_readback', { matched: false, corrected_value: 'A472-19' });
+    assert.equal(m.state.phase, 'EXCHANGE');
+    m.addHumanTime(1_000);
+    assert.equal(m.state.phase, 'CLOSING');
+    assert.deepEqual(escalations, ['phase_timeout']);
+  });
+
+  test('reset() starts every budget again', () => {
+    const { m } = exchanging();
+    m.addHumanTime(POSITION_POLICY[positionId('HUMAN', 'EXCHANGE')]!.phaseTimeoutMs! - 1);
+    m.reset();
+    m.onChannelChange('HUMAN');
+    m.addHumanTime(1);
+    assert.equal(m.state.phase, 'EXCHANGE');
+  });
+
   test('CLOSING does not time out into DONE — only §5.4\'s two conditions end a call', () => {
     const { m, escalations } = exchanging();
     m.onToolAccepted('capture_auth_number', { value: 'A472-91' });

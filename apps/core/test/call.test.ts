@@ -613,6 +613,45 @@ describe('who has been told, and for how long they waited (ADR-017)', () => {
   });
 });
 
+describe('HUMAN time feeds the phase backstop (§5.4)', () => {
+  const human = (r: ReturnType<typeof rig>) => r.loop.gate.setChannel('HUMAN', { kind: 'transport', cause: 'test' });
+
+  test('once a second while a person is on the line', () => {
+    const r = rig();
+    human(r);
+    r.advance(1_000);
+    r.advance(1_000);
+    assert.equal(r.loop.phase.state.humanChannelMs, 2_000);
+  });
+
+  test('the part of a second before the channel leaves HUMAN is not lost', () => {
+    const r = rig();
+    human(r);
+    r.advance(999);
+    r.loop.gate.setChannel('HOLD', { kind: 'acoustic', seq: 1 });
+    assert.equal(r.loop.phase.state.humanChannelMs, 999);
+  });
+
+  test('a hold adds nothing — the tick stops with the channel', () => {
+    const r = rig();
+    human(r);
+    r.advance(1_000);
+    r.loop.gate.setChannel('HOLD', { kind: 'acoustic', seq: 1 });
+    r.advance(600_000);
+    assert.equal(r.loop.phase.state.humanChannelMs, 1_000);
+    assert.equal(r.loop.phase.state.phase, 'EXCHANGE', 'ten minutes on hold did not time the exchange out');
+  });
+
+  test('stop() stops it', () => {
+    const r = rig();
+    human(r);
+    r.loop.stop();
+    r.advance(600_000);
+    assert.equal(r.loop.phase.state.humanChannelMs, 0);
+    assert.equal(r.loop.phase.state.phase, 'EXCHANGE');
+  });
+});
+
 describe('HOLD_CUE + HOLD_CONFIRM_MS, through the loop', () => {
   test('a filler cue while the representative keeps talking never leaves HUMAN', () => {
     const r = rig();
