@@ -36,6 +36,15 @@ describe('the §5.4 table, row by row', () => {
     m.onChannelChange('HUMAN');
     assert.equal(m.state.phase, 'EXCHANGE');
     assert.deepEqual(phases().map((e) => [e.from, e.to]), [['NOT_STARTED', 'EXCHANGE']]);
+    // §5.4's row, INV-13 and INV-21: semantic — never transport, which INV-13
+    // rejected on every call that reached a person until 2026-09-30.
+    assert.equal(phases()[0]!.producer.kind, 'semantic');
+  });
+
+  test('…and it carries the producer that moved the CHANNEL, when the caller has it', () => {
+    const { m, phases } = setup();
+    m.onChannelChange('HUMAN', { kind: 'semantic', seq: 41 });
+    assert.deepEqual(phases()[0]!.producer, { kind: 'semantic', seq: 41 });
   });
 
   test('a later return to HUMAN does not move the phase back (INV-13)', () => {

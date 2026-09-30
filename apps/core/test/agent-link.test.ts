@@ -11,15 +11,18 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { BYTES_PER_FRAME, MULAW_SILENCE } from '@holdharmless/audio';
 import type { ReplyCause, ReplyGuardState, SessionConfig } from '@holdharmless/agent';
-import { HOLD_CONFIRM_MS, PARTY_CONTINUITY_MS, type ChannelTimers } from '@holdharmless/callmodel';
+import { HOLD_CONFIRM_MS, HOLD_TIMEOUT_MS, PARTY_CONTINUITY_MS, type ChannelTimers } from '@holdharmless/callmodel';
+import { checkInvariants } from '@holdharmless/invariants';
 import type { AuthRequest, GateIntent, ToolName } from '@holdharmless/events';
 import { PROFILES, gateAdmits, type AudioSource, type CallTransport } from '@holdharmless/transport';
-import { createEventLog, createWorkQueue, startCall, type AgentMedia, type BridgeScheduler } from '../src/index.js';
+import { PLAYOUT_MARK_TIMEOUT_MS, createEventLog, createWorkQueue, dropCauseOf, startCall, type AgentMedia, type BridgeScheduler } from '../src/index.js';
 
 const request: AuthRequest = {
-  id: 'R1', patientRef: 'p', memberId: 'm', patientDob: '1970-01-01',
+  // Synthetic by INV-12's rules, so the end-to-end tests can hold the whole
+  // log to every invariant without a fixture exemption.
+  id: 'R1', patientRef: 'SYN-P1', memberId: 'SYN-M1', patientDob: '1970-01-01',
   cptCode: '96413', icdCode: 'C50.911', providerNpi: '1234567890', serviceDate: '2026-10-01',
-  payerId: 'payer', payerEndpoint: 'ws://x', clinicName: 'Clinic', clinicCallbackPhone: '555',
+  payerId: 'payer', payerEndpoint: 'ws://127.0.0.1:8090', clinicName: 'Clinic', clinicCallbackPhone: '555-0142',
   priority: 'routine', clinicalSummary: 's', status: 'in_progress', attempts: 0,
 };
 
@@ -37,10 +40,12 @@ class FakeSession implements AgentMedia {
   };
   /** What the guard said while the session was being built — before the call was wired. */
   readonly guardAtConstruction: ReplyGuardState;
-  constructor(readonly guard: () => ReplyGuardState) {
+  ended = false;
+  constructor(readonly guard: () => ReplyGuardState, readonly isClosing: () => boolean = () => false) {
     // A real session could consult its guard at any moment, including this one.
     this.guardAtConstruction = guard();
   }
+  end(): Promise<void> { this.ended = true; return Promise.resolve(); }
   sendAudio(f: Uint8Array): void { this.heard.push(f); }
   onTranscriptDelta(f: (t: string) => void): void { this.h.delta.push(f); }
   onTurn(f: (s: 'agent' | 'far_end', t: string, c: boolean) => void): void { this.h.turn.push(f); }
@@ -81,7 +86,14 @@ class FakeSession implements AgentMedia {
     for (const f of this.h.audio) f(bytes);
   }
   replyDone(status: 'completed' | 'interrupted'): void { for (const f of this.h.done) f(status); }
-  agentTurn(text: string, closing = false): void { for (const f of this.h.turn) f('agent', text, closing); }
+  /** Like the real session: the closing flag is ASKED for when the turn is emitted (§7.6). */
+  agentTurn(text: string, closing = this.isClosing()): void { for (const f of this.h.turn) f('agent', text, closing); }
+  /** One whole spoken reply: started, audio, its transcript, done. */
+  speaks(text: string, frames = 10, status: 'completed' | 'interrupted' = 'completed'): void {
+    this.replies(new Uint8Array(frames * BYTES_PER_FRAME).fill(0x30));
+    this.agentTurn(text);
+    this.replyDone(status);
+  }
   speechStarted(): void { for (const f of this.h.speech) f(); }
 }
 
@@ -89,7 +101,13 @@ function fakeTransport() {
   let intent: GateIntent = 'closed';
   const sent: { frame: Uint8Array; source: AudioSource }[] = [];
   let clears = 0;
+  let hangups = 0;
   let onAudio: ((f: Uint8Array) => void) | null = null;
+  let onClosed: ((c: 'far_end_hangup' | 'link_drop' | 'timeout') => void) | null = null;
+  const markHandlers: ((name: string) => void)[] = [];
+  const marks: string[] = [];
+  /** Whether the far end answers a mark (it has played everything before it). */
+  let echoMarks = true;
   const t: CallTransport = {
     kind: 'loopback',
     dial: async () => {},
@@ -99,16 +117,27 @@ function fakeTransport() {
       return true;
     },
     clear: async () => { clears++; return []; },
-    mark: async () => {},
+    mark: async (name) => {
+      marks.push(name);
+      if (echoMarks) for (const h of markHandlers) h(name);
+    },
     applyGate(next) { intent = next; },
     gate: () => intent,
-    hangup: async () => {},
+    hangup: async () => { hangups++; },
     onAudio(h) { onAudio = h; },
-    onMark() {},
+    onMark(h) { markHandlers.push(h); },
     onFault() {},
-    onClosed() {},
+    onClosed(h) { onClosed = h; },
   };
-  return { t, sent, feed: (f: Uint8Array) => onAudio?.(f), get clears() { return clears; }, get intent() { return intent; } };
+  return {
+    t, sent, marks,
+    feed: (f: Uint8Array) => onAudio?.(f),
+    close: (c: 'far_end_hangup' | 'link_drop' | 'timeout') => onClosed?.(c),
+    silenceMarks: () => { echoMarks = false; },
+    get clears() { return clears; },
+    get hangups() { return hangups; },
+    get intent() { return intent; },
+  };
 }
 
 function manualTime() {
@@ -151,7 +180,7 @@ function rig(over: Partial<AuthRequest> = {}) {
   const queue = createWorkQueue({ requests: [req], emit: (e) => log.append(e) });
   const call = startCall({
     request: req, queue, log, transport: tp.t, navMode: 'dtmf', networkProfile: 'TELEPHONY',
-    createSession: (guard) => (session = new FakeSession(guard)),
+    createSession: (guard, isClosing) => (session = new FakeSession(guard, isClosing)),
     nowMs: clock.now,
     epochMs: () => 1_000_000 + clock.now(),
     timers: clock.timers,
@@ -376,7 +405,7 @@ describe('per-position configuration reaches the session (§5.6, §7.3)', () => 
       createSession: (guard) => new FakeSession(guard),
       nowMs: clock.now, timers: clock.timers, bridge: { now: clock.now, scheduler: clock.scheduler },
     });
-    assert.equal(live, 1);
+    assert.ok(live > 0, 'the call reads its own log');
     call.stop();
     assert.equal(live, 0, 'a work queue running many calls would otherwise keep every one of them alive');
   });
@@ -448,6 +477,24 @@ describe('tools reach the call (§8, module 4.0 step 4)', () => {
     assert.equal(r.queue.get('R1')!.status, 'approved');
     assert.equal(r.call.loop.phase.state.outcomeWritten, true);
     assert.equal(r.call.loop.phase.state.phase, 'CLOSING', 'recording the outcome does not end the call (ADR-015)');
+  });
+
+  test('every transition a tool produces names its tool.called by seq (§3.3 rule 4)', async () => {
+    const r = await atHuman();
+    r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+    r.session.farEndSays('the authorization number is A472-91');
+    r.session.callsTool('capture_auth_number', { value: 'A472-91' });
+    r.session.callsTool('notify_transfer', { destination: 'utilization management' });
+    const ev = r.log.events();
+    const toolCalled = (name: string) => ev.find((e) => e.t === 'tool.called' && e.name === name)!;
+    const ph = ev.find((e) => e.t === 'phase.changed' && e.to === 'READBACK')!;
+    assert.ok(ph.t === 'phase.changed' && ph.producer.kind === 'tool');
+    assert.equal(ph.producer.kind === 'tool' && ph.producer.seq, toolCalled('capture_auth_number').seq);
+    const ch = ev.find((e) => e.t === 'channel.changed' && e.to === 'TRANSFER')!;
+    assert.equal(ch.t === 'channel.changed' && ch.producer.kind === 'tool' && ch.producer.seq, toolCalled('notify_transfer').seq);
+    const gate = ev.find((e) => e.t === 'gate.changed' && e.producer.kind === 'tool')!;
+    assert.equal(gate.t === 'gate.changed' && gate.producer.kind === 'tool' && gate.producer.seq, toolCalled('notify_transfer').seq,
+      'the gate closed on the ANNOUNCEMENT, and says which one (ADR-019)');
   });
 
   test('a captured number the far end never said is flagged for review, not refused (§8.2)', async () => {
@@ -621,5 +668,226 @@ describe('tools after stop()', () => {
     r.session.callsTool('capture_auth_number', { value: 'A472-91' }, 'late');
     assert.equal(r.session.results.length, 0);
     assert.equal(r.call.loop.phase.state.phase, 'EXCHANGE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5: the closing, DONE, the hangup, and the outcome when the line closes
+// ---------------------------------------------------------------------------
+
+/** HUMAN → number captured and confirmed: the call is in CLOSING/wrapup. */
+async function atClosing() {
+  const r = await atHuman();
+  r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+  r.session.farEndSays('the authorization number is A472-91');
+  r.session.callsTool('capture_auth_number', { value: 'A472-91' });
+  r.session.callsTool('confirm_readback', { matched: true });
+  assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+  await r.call.configurator.idle();
+  return r;
+}
+
+/** The model's record_outcome reply: it starts, calls the tool, and ends. */
+function recordsOutcome(r: Awaited<ReturnType<typeof atClosing>>, text = 'Let me record that.') {
+  r.session.replies(speech(5));
+  r.session.agentTurn(text);
+  const res = r.session.callsTool('record_outcome', { status: 'approved', auth_number: 'A472-91' });
+  r.session.replyDone('completed');
+  return res;
+}
+
+const invariantsOf = (r: ReturnType<typeof rig>) =>
+  // One representative throughout: the harness's ground truth for INV-7 (ADR-018).
+  checkInvariants({ call: r.call.loop.snapshot(), request: r.req, log: r.log.events(), harnessParties: 1 }, 'all');
+
+describe('the closing detector (§7.6), as built', () => {
+  test('the reply that CALLS record_outcome is not closing; the reply after it is', async () => {
+    const r = await atClosing();
+    recordsOutcome(r);
+    r.session.speaks('Thank you so much, have a good day.');
+    const agent = r.log.events().filter((e) => e.t === 'turn.transcribed' && e.speaker === 'agent');
+    const byText = (t: string) => agent.find((e) => e.t === 'turn.transcribed' && e.text === t);
+    const recording = byText('Let me record that.')!;
+    assert.ok(recording.t === 'turn.transcribed' && !recording.isClosing, 'started before the marker');
+    const bye = byText('Thank you so much, have a good day.')!;
+    assert.ok(bye.t === 'turn.transcribed' && bye.isClosing, 'past [[CLOSING]]');
+  });
+
+  test('a REJECTED record_outcome does not pass the marker: what the model says next is not a closing', async () => {
+    const r = await atClosing();
+    r.session.replies(speech(5));
+    const res = r.session.callsTool('record_outcome', { status: 'approved' }); // no auth_number: refused
+    r.session.replyDone('completed');
+    assert.equal(res.isError, true);
+    r.session.speaks('Sorry, let me try that again.');
+    const last = r.log.events().filter((e) => e.t === 'turn.transcribed' && e.speaker === 'agent').at(-1)!;
+    assert.ok(last.t === 'turn.transcribed' && !last.isClosing);
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+  });
+
+  test('nothing before CLOSING is ever marked closing', async () => {
+    const r = await atHuman();
+    r.session.speaks('Hi, I am calling about a prior authorization.');
+    const t = r.log.events().filter((e) => e.t === 'turn.transcribed' && e.speaker === 'agent');
+    assert.ok(t.every((e) => e.t === 'turn.transcribed' && !e.isClosing));
+  });
+});
+
+describe('DONE, then the hangup — after the goodbye is heard (§5.4, ADR-015)', () => {
+  test('the whole call: outcome, goodbye, DONE, hangup, CLOSED, call.ended — and no invariant violated', async () => {
+    const r = await atClosing();
+    recordsOutcome(r);
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING', 'recording is not the end (ADR-015)');
+    r.session.speaks('Thank you so much, have a good day.', 50);
+    assert.equal(r.call.loop.phase.state.phase, 'DONE');
+    assert.equal(r.tp.hangups, 0, 'not while the goodbye is still queued in the bridge');
+    r.clock.advance(1_200);
+    assert.equal(r.tp.hangups, 1);
+    assert.equal(r.call.loop.gate.channel, 'CLOSED');
+    const end = await r.call.finished;
+    assert.deepEqual(end, { dropped: null, outcome: { status: 'approved', authNumber: 'A472-91' } });
+    const ended = r.log.events().filter((e) => e.t === 'call.ended');
+    assert.deepEqual(ended.map((e) => e.t === 'call.ended' && e.outcome), [{ status: 'approved', authNumber: 'A472-91' }], 'in the log, once');
+    assert.ok(r.session.ended, 'session.end, never a bare close (§15)');
+    assert.equal(r.kinds().includes('call.dropped'), false, 'we hung up: nothing dropped');
+    assert.deepEqual(invariantsOf(r), []);
+  });
+
+  test('the end-to-end check has teeth: the same call with no disclosure spoken fails INV-7', async () => {
+    const r = await atHuman(); // never says it is an AI assistant
+    r.session.farEndSays('the authorization number is A472-91');
+    r.session.callsTool('capture_auth_number', { value: 'A472-91' });
+    r.session.callsTool('confirm_readback', { matched: true });
+    await r.call.configurator.idle();
+    recordsOutcome(r);
+    r.session.speaks('Thank you, goodbye.');
+    r.clock.advance(1_000);
+    await r.call.finished;
+    assert.deepEqual(invariantsOf(r).map((v) => v.id), ['INV-7']);
+  });
+
+  test('an interrupted goodbye is not a closing delivered: no DONE until one completes', async () => {
+    const r = await atClosing();
+    recordsOutcome(r);
+    r.session.speaks('Thank you so—', 5, 'interrupted');
+    assert.equal(r.call.loop.phase.state.phase, 'CLOSING');
+    r.session.speaks('Of course. Thank you, goodbye.');
+    assert.equal(r.call.loop.phase.state.phase, 'DONE');
+  });
+
+  test('the far end never confirms playout: the hangup still happens, bounded', async () => {
+    const r = await atClosing();
+    r.tp.silenceMarks();
+    recordsOutcome(r);
+    r.session.speaks('Thank you, goodbye.', 5);
+    r.clock.advance(500);
+    assert.deepEqual(r.tp.marks, ['closing-played']);
+    assert.equal(r.tp.hangups, 0, 'waiting for the far end');
+    r.clock.advance(PLAYOUT_MARK_TIMEOUT_MS);
+    assert.equal(r.tp.hangups, 1);
+  });
+
+  test('the escalation closing ends the same way, with the outcome escalated', async () => {
+    const r = await atHuman();
+    r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+    r.session.replies(speech(5));
+    r.session.callsTool('escalate_to_human', { reason: 'clinical', context_summary: GOOD_SUMMARY });
+    r.session.replyDone('completed');
+    await r.call.configurator.idle();
+    r.session.replies(speech(5));
+    r.session.callsTool('record_outcome', { status: 'escalated', notes: 'clinical question' });
+    r.session.replyDone('completed');
+    r.session.speaks('Our clinical staff will call you back. Thank you, goodbye.');
+    assert.equal(r.call.loop.phase.state.phase, 'DONE');
+    r.clock.advance(1_000);
+    const end = await r.call.finished;
+    assert.equal(end.outcome?.status, 'escalated');
+    assert.deepEqual(invariantsOf(r), []);
+  });
+});
+
+describe('the line closing without a finished call (INV-18, INV-19)', () => {
+  test('the far end hangs up mid-exchange: dropped, nothing written, the request stays open for redial', async () => {
+    const r = await atHuman();
+    r.tp.close('far_end_hangup');
+    const end = await r.call.finished;
+    assert.deepEqual(end, { dropped: 'far_end_hangup', outcome: null });
+    const dropped = r.log.events().filter((e) => e.t === 'call.dropped');
+    assert.deepEqual(dropped.map((e) => e.t === 'call.dropped' && e.cause), ['far_end_hangup'], 'in the LOG, where INV-19 looks');
+    assert.equal(r.queue.get('R1')!.status, 'in_progress');
+    assert.equal(r.kinds().includes('call.ended'), false, 'no final status, so no call.ended');
+    assert.ok(r.session.ended);
+    assert.equal(r.tp.hangups, 0, 'the far end is already gone');
+  });
+
+  test('…on the last attempt, the request is failed', async () => {
+    const r = rig({ attempts: 3 });
+    await r.call.loop.dial('ws://payer', PROFILES.TELEPHONY);
+    r.tp.close('link_drop');
+    const end = await r.call.finished;
+    assert.deepEqual(end, { dropped: 'link_drop', outcome: { status: 'failed' } });
+  });
+
+  test('dropped after the model escalated: escalated is written, never failed (INV-19)', async () => {
+    const r = await atHuman({ attempts: 3 });
+    r.session.agentTurn("Hi, I'm an AI assistant calling on behalf of Clinic.");
+    r.session.callsTool('escalate_to_human', { reason: 'clinical', context_summary: GOOD_SUMMARY });
+    r.tp.close('far_end_hangup');
+    const end = await r.call.finished;
+    assert.equal(end.outcome?.status, 'escalated');
+    assert.deepEqual(invariantsOf(r), []);
+  });
+
+  test('dropped after the outcome was recorded: the outcome stands, and the call still ended', async () => {
+    const r = await atClosing();
+    recordsOutcome(r);
+    r.tp.close('far_end_hangup');
+    const end = await r.call.finished;
+    assert.deepEqual(end, { dropped: 'far_end_hangup', outcome: { status: 'approved', authNumber: 'A472-91' } });
+    assert.equal(r.log.events().filter((e) => e.t === 'outcome.written' && !e.skipped).length, 1, 'written once');
+    assert.equal(r.log.events().some((e) => e.t === 'outcome.written' && e.writer === 'call_model'), false,
+      'the Call Model does not even attempt a write the call already made — a skipped entry is noise in an audit trail');
+  });
+
+  test('a hold nobody ends: HOLD_TIMEOUT_MS closes the call — and hangs up the line the timer closed', async () => {
+    const r = await atHuman();
+    r.session.farEndSays('one moment please');
+    r.clock.advance(HOLD_CONFIRM_MS);
+    assert.equal(r.call.loop.gate.channel, 'HOLD');
+    r.clock.advance(HOLD_TIMEOUT_MS);
+    const end = await r.call.finished;
+    assert.equal(end.dropped, 'timeout');
+    assert.equal(r.tp.hangups, 1, 'the far end is still there; the line must be put down');
+  });
+
+  test('the close is written AFTER its atomic phase follow-up, not in the middle of it', async () => {
+    const r = await atHuman();
+    r.tp.close('far_end_hangup');
+    await r.call.finished;
+    const k = r.kinds();
+    const at = k.lastIndexOf('channel.changed');
+    assert.equal(k[at + 1], 'phase.changed', 'CLOSED → DONE sits next to the channel change (§5.3)');
+  });
+
+  test('after the call has finished, it is stopped: nothing it hears moves anything', async () => {
+    const r = await atHuman();
+    r.tp.close('far_end_hangup');
+    await r.call.finished;
+    const before = r.log.length;
+    r.session.farEndSays('hello? are you there?');
+    r.session.callsTool('capture_auth_number', { value: 'A472-91' }, 'late');
+    assert.equal(r.log.length, before);
+  });
+});
+
+describe('dropCauseOf', () => {
+  test('every producer that can close a call maps to a §9.3 DropCause', () => {
+    assert.equal(dropCauseOf({ kind: 'transport', cause: 'far_end_hangup' }), 'far_end_hangup');
+    assert.equal(dropCauseOf({ kind: 'transport', cause: 'timeout' }), 'timeout');
+    assert.equal(dropCauseOf({ kind: 'transport', cause: 'link_drop' }), 'link_drop');
+    assert.equal(dropCauseOf({ kind: 'transport', cause: 'link_refused: ECONNREFUSED' }), 'link_drop');
+    assert.equal(dropCauseOf({ kind: 'timer', name: 'HOLD_TIMEOUT_MS' }), 'timeout');
+    assert.equal(dropCauseOf({ kind: 'timer', name: 'TRANSFER_TIMEOUT_MS' }), 'timeout');
+    assert.equal(dropCauseOf({ kind: 'timer', name: 'REPROMPT_LIMIT' }), 'unresponsive');
   });
 });

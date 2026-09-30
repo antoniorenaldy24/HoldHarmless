@@ -26,7 +26,8 @@ import type { AuthRequest, NavMode, NetworkProfileName } from '@holdharmless/eve
 import { createAudioBridge, type AudioBridge, type AudioBridgeOptions } from './audio-bridge.js';
 import { startCallLoop, type CallLoop, type TranscriptSource } from './call.js';
 import type { EventLog } from './log.js';
-import { createConfigurator, type Configurator } from './position-config.js';
+import { createConfigurator, positionConfig, type Configurator, type PositionInputs } from './position-config.js';
+import { createClosingSequence, type CallEnd, type ClosingSequence } from './closing.js';
 import { connectTools, type AgentTools, type ToolLink } from './tool-link.js';
 import type { WorkQueue } from './work-queue.js';
 
@@ -45,6 +46,8 @@ export interface AgentMedia extends AgentTools {
   onReplyDone(f: (status: 'completed' | 'interrupted') => void): void;
   /** Mutable fields only; resolves on session.updated (§7.1). */
   update(config: Partial<SessionConfig>): Promise<void>;
+  /** session.end, then close — never a bare close (§15). */
+  end(): Promise<void>;
 }
 
 /**
@@ -81,7 +84,7 @@ export type CallDeps = {
    * the gate lives in the call loop, and the call loop reads the session's
    * transcripts. The factory is called once the guard can be answered.
    */
-  createSession: (guard: () => ReplyGuardState) => AgentMedia;
+  createSession: (guard: () => ReplyGuardState, isClosing: () => boolean) => AgentMedia;
   nowMs?: () => number;
   epochMs?: () => number;
   timers?: ChannelTimers;
@@ -98,6 +101,9 @@ export interface Call {
   readonly session: AgentMedia;
   readonly configurator: Configurator;
   readonly tools: ToolLink;
+  readonly closing: ClosingSequence;
+  /** Resolves when the line has closed and the call's end is fully written. */
+  readonly finished: Promise<CallEnd>;
   stop(): void;
 }
 
@@ -115,7 +121,10 @@ export function startCall(deps: CallDeps): Call {
   let loop: CallLoop | null = null;
   const guard = (): ReplyGuardState =>
     loop ? { gateIntent: loop.gate.gate, holdSuspected: loop.gate.holdSuspected } : { gateIntent: 'closed', holdSuspected: false };
-  const session = deps.createSession(guard);
+  // The same knot for §7.6: the session asks whether the reply it is producing
+  // is closing, and the tracker that knows is built after it.
+  let closingRef: ClosingSequence | null = null;
+  const session = deps.createSession(guard, () => closingRef?.isClosing() ?? false);
   // The phase machine is built inside the loop and the coordinator after it;
   // the escalation callback is bound once both exist.
   let tools: ToolLink | null = null;
@@ -170,16 +179,17 @@ export function startCall(deps: CallDeps): Call {
   // Step 3: the session is brought to every settled position. What moves the
   // position is in the log — channel and phase changes — and so is what changes
   // the prompt without moving it: a disclosure heard, a party reset.
+  const readInputs = (): PositionInputs => ({
+    call: live.snapshot(),
+    request: deps.request,
+    navMode: deps.navMode,
+    disclosure: live.disclosure,
+    holdSegmentMs: live.lastHoldSegmentMs,
+  });
   const configurator = createConfigurator({
     session,
     log: deps.log,
-    read: () => ({
-      call: live.snapshot(),
-      request: deps.request,
-      navMode: deps.navMode,
-      disclosure: live.disclosure,
-      holdSegmentMs: live.lastHoldSegmentMs,
-    }),
+    read: readInputs,
     onFault: deps.onFault ?? ((err) => console.error('[call] session.update refused:', err)),
     ...(deps.defer ? { defer: deps.defer } : {}),
   });
@@ -187,6 +197,22 @@ export function startCall(deps: CallDeps): Call {
     if (e.t === 'channel.changed') configurator.request(e.from);
     else if (e.t === 'phase.changed' || e.t === 'disclosure.delivered' || e.t === 'party.changed') configurator.request();
   });
+
+  // Step 5: the closing detector, DONE, the hangup, and the outcome when the
+  // line closes without one.
+  const closing = createClosingSequence({
+    loop: live,
+    bridge,
+    transport: deps.transport,
+    log: deps.log,
+    request: deps.request,
+    queue: deps.queue,
+    markersAt: () => positionConfig(readInputs()).bundle?.markerOrder ?? [],
+    endSession: () => session.end(),
+    onFinished: () => call.stop(),
+    ...(deps.timers ? { timers: deps.timers } : {}),
+  });
+  closingRef = closing;
 
   // The agent hears EVERYTHING the far end sends, whatever the gate says. The
   // gate governs what the agent may SAY; muting what it hears would leave it
@@ -200,9 +226,12 @@ export function startCall(deps: CallDeps): Call {
   });
 
   session.onReplyStarted(() => {
+    if (stopped) return;
+    // §7.6: a reply is closing or not from the moment it starts being generated.
+    closing.onReplyStarted();
     // §6.2's responsiveness signal. The loop decides whether a person could be
     // the one replying; this only reports that the agent spoke.
-    if (!stopped) live.noteAgentSpoke();
+    live.noteAgentSpoke();
   });
 
   session.onReplyDone((status) => {
@@ -212,6 +241,8 @@ export function startCall(deps: CallDeps): Call {
     if (status === 'interrupted') void bridge.interrupt();
     else bridge.finishReply();
     toolLink.onReplyDone(status);
+    // Last: a closing reply's completion can produce DONE, which starts the hangup.
+    closing.onReplyDone(status);
   });
 
   session.onSpeechStarted(() => {
@@ -239,19 +270,23 @@ export function startCall(deps: CallDeps): Call {
     live.disclosure.onAgentTurn(text);
   });
 
-  return {
+  const call: Call = {
     loop: live,
     bridge,
     session,
     configurator,
     tools: toolLink,
+    closing,
+    finished: closing.finished,
     stop(): void {
       stopped = true;
       unsubscribe();
       configurator.stop();
       toolLink.stop();
+      closing.stop();
       live.stop();
       bridge.stop();
     },
   };
+  return call;
 }

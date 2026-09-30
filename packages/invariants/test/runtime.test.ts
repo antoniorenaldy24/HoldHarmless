@@ -12,7 +12,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { CallEventBody } from '@holdharmless/events';
+import type { CallEvent, CallEventBody } from '@holdharmless/events';
 import { INVARIANTS, checkInvariants, isReportable, type InvariantContext } from '../src/index.js';
 import {
   APPROVED, ESCALATED, build, call, request,
@@ -170,6 +170,18 @@ describe('each invariant fails on a log crafted to break it', () => {
       { t: 'tool.called', toolCallId: 'tc9', name: 'record_outcome', args: { status: 'approved' } },
       { t: 'tool.returned', toolCallId: 'tc9', name: 'record_outcome', result: { ok: true }, latencyMs: 1 },
     )), 'INV-10');
+  });
+
+  test('INV-10 — NOT violated by the accepted call s own write, which lands before its tool.returned', () => {
+    // The order the tool handler actually produces: called, the effect writes
+    // the final status, then returned. The call was made while not final.
+    const log: CallEvent[] = [
+      { seq: 1, callId: 'C', at: '', t: 'tool.called', toolCallId: 'tc1', name: 'record_outcome', args: { status: 'approved' } },
+      { seq: 2, callId: 'C', at: '', t: 'outcome.written', writer: 'tool_handler', status: 'approved', skipped: false },
+      { seq: 3, callId: 'C', at: '', t: 'tool.returned', toolCallId: 'tc1', name: 'record_outcome', result: { ok: true }, latencyMs: 1 },
+    ];
+    const inv = INVARIANTS.find((i) => i.id === 'INV-10')!;
+    assert.equal(inv.check({ ...approved(), log }), null);
   });
 
   test('INV-12 — an NPI that passes the check digit could be real', () => {

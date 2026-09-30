@@ -17,3 +17,4 @@ export * from './audio-bridge.js';
 export * from './agent-link.js';
 export * from './position-config.js';
 export * from './tool-link.js';
+export * from './closing.js';

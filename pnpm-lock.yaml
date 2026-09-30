@@ -220,6 +220,9 @@ importers:
       '@holdharmless/classifier':
         specifier: workspace:*
         version: link:../../packages/classifier
+      '@holdharmless/detectors':
+        specifier: workspace:*
+        version: link:../../packages/detectors
       '@holdharmless/events':
         specifier: workspace:*
         version: link:../../packages/events

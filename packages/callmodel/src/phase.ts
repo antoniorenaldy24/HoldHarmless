@@ -51,9 +51,13 @@ export type PhaseOptions = {
 export interface PhaseMachine {
   readonly state: Readonly<PhaseState>;
   /** A tool the handler has already authorized and validated (§8.7 order). */
-  onToolAccepted(name: ToolName, args: Record<string, unknown>): void;
+  /**
+   * `seq` is the core-assigned seq of the tool.called event (§3.3 rule 4), so
+   * the phase change names the call that produced it. 0 when the caller has none.
+   */
+  onToolAccepted(name: ToolName, args: Record<string, unknown>, seq?: number): void;
   /** The channel moved. Only two entries touch the phase, both atomically (§5.3). */
-  onChannelChange(to: string): void;
+  onChannelChange(to: string, cause?: Producer): void;
   /** reply.done for a turn that carried the [[CLOSING]] marker (§7.6). */
   onClosingTurnComplete(status: 'completed' | 'interrupted'): void;
   /** Accumulated HUMAN time; the backstop for tool-driven transitions (§5.4). */
@@ -116,8 +120,8 @@ export function createPhaseMachine(options: PhaseOptions = {}): PhaseMachine {
       return state;
     },
 
-    onToolAccepted(name: ToolName, args: Record<string, unknown>): void {
-      const producer: Producer = { kind: 'tool', seq: 0, name };
+    onToolAccepted(name: ToolName, args: Record<string, unknown>, seq = 0): void {
+      const producer: Producer = { kind: 'tool', seq, name };
       switch (name) {
         case 'capture_auth_number': {
           state.capturedAuthNumber = String(args['value']);
@@ -159,11 +163,19 @@ export function createPhaseMachine(options: PhaseOptions = {}): PhaseMachine {
       }
     },
 
-    onChannelChange(to: string): void {
+    onChannelChange(to: string, cause?: Producer): void {
       // §5.3: phase is untouched by every row except these two, and both are
       // applied in the same handler as the channel change (settle()).
       if (to === 'HUMAN' && state.phase === 'NOT_STARTED') {
-        move('EXCHANGE', { kind: 'transport', cause: 'channel_became_human' });
+        // The producer is the one that moved the CHANNEL — §5.4's row, INV-13
+        // and INV-21 all say semantic, because only a semantic observation
+        // moves a call into HUMAN (§5.3). Until 2026-09-30 this recorded
+        // `transport`, which INV-13 rejects on every call that reaches a
+        // person; no test had run the phase machine and the log invariants
+        // together. A caller that knows the channel's producer passes it, so a
+        // channel moved by anything else is visible to INV-21 as the anomaly
+        // it is rather than relabelled here.
+        move('EXCHANGE', cause ?? { kind: 'semantic', seq: 0 });
         return;
       }
       if (to === 'CLOSED' && state.phase !== 'DONE') {

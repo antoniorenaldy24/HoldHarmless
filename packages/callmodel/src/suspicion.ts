@@ -63,7 +63,8 @@ export interface GateController {
 
   onAcoustic(observation: AcousticObservation): void;
   onSemantic(observation: SemanticObservation): void;
-  onToolCall(name: string): void;
+  /** `seq`: the core-assigned seq of the tool.called event (§3.3 rule 4); 0 when unknown. */
+  onToolCall(name: string, seq?: number): void;
   /** §15: a session gap is treated as a hold until the session is back. */
   setConnection(state: 'lost' | 'restored'): void;
   setChannel(channel: Channel, producer: Producer): void;
@@ -178,10 +179,10 @@ export function createGateController(options: GateControllerOptions): GateContro
       humanRun = 0; // IVR_PROMPT is not evidence of a person
     },
 
-    onToolCall(name: string): void {
+    onToolCall(name: string, seq = 0): void {
       // ADR-019: a transfer is announced by the tool, and the gate closes on
       // the announcement rather than waiting for the audio to change.
-      if (name === 'notify_transfer') suspect('notify_transfer', { kind: 'tool', seq: 0, name: 'notify_transfer' });
+      if (name === 'notify_transfer') suspect('notify_transfer', { kind: 'tool', seq, name: 'notify_transfer' });
     },
 
     setConnection(state: 'lost' | 'restored'): void {

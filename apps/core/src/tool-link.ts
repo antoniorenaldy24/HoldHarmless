@@ -30,6 +30,7 @@
 
 import type { ReplyCause, ReplyProduct } from '@holdharmless/agent';
 import { gateAdmitsProduct, type AuthRequest, type ToolName } from '@holdharmless/events';
+import type { PhaseMachine } from '@holdharmless/callmodel';
 import type { AudioBridge } from './audio-bridge.js';
 import type { CallLoop } from './call.js';
 import { createToolEffects } from './effects.js';
@@ -78,6 +79,24 @@ export function connectTools(deps: ToolLinkDeps): ToolLink {
   let stopped = false;
   /** True while a tool call is being handled — which is always INSIDE a reply. */
   let inToolCall = false;
+  /**
+   * The seq of the tool.called now being handled (§3.3 rule 4). The handler
+   * writes tool.called first, so it is the log's length at that moment; every
+   * transition the call produces names it.
+   */
+  let toolSeq = 0;
+  /** The phase machine, with each tool's transition attributed to its call. */
+  const phase: PhaseMachine = {
+    get state() {
+      return loop.phase.state;
+    },
+    onToolAccepted: (name, args) => loop.phase.onToolAccepted(name, args, toolSeq),
+    onChannelChange: (to, cause) => loop.phase.onChannelChange(to, cause),
+    onClosingTurnComplete: (status) => loop.phase.onClosingTurnComplete(status),
+    addHumanTime: (ms) => loop.phase.addHumanTime(ms),
+    onRecoveryLimit: () => loop.phase.onRecoveryLimit(),
+    reset: () => loop.phase.reset(),
+  };
   /** Tier 1's instruction, held until the reply that carried the tool call ends. */
   let deferred: string | null = null;
 
@@ -115,7 +134,7 @@ export function connectTools(deps: ToolLinkDeps): ToolLink {
   const effects = createToolEffects({
     request,
     queue: deps.queue,
-    phase: loop.phase,
+    phase,
     emit: (body) => log.append(body),
     sendDtmf: (digits, reason) => {
       log.append({ t: 'dtmf.sent', digits, reason });
@@ -124,11 +143,11 @@ export function connectTools(deps: ToolLinkDeps): ToolLink {
     setChannel: (to) => {
       if (to !== 'TRANSFER') return;
       // ADR-019: the gate closes on the ANNOUNCEMENT, before the audio changes.
-      loop.gate.onToolCall('notify_transfer');
-      loop.channels.onNotifyTransfer(0);
+      loop.gate.onToolCall('notify_transfer', toolSeq);
+      loop.channels.onNotifyTransfer(toolSeq);
     },
     escalate: (reason, contextSummary) => {
-      loop.phase.onToolAccepted('escalate_to_human', { reason });
+      phase.onToolAccepted('escalate_to_human', { reason });
       escalation.onModelSummary(contextSummary);
     },
   });
@@ -148,6 +167,7 @@ export function connectTools(deps: ToolLinkDeps): ToolLink {
   session.onToolCall((callId, name, args) => {
     if (stopped) return;
     inToolCall = true;
+    toolSeq = log.length;
     try {
       const { result, isError } = resultMessage(handlers.handle(log.callId, callId, name, args));
       session.queueToolResult(callId, result, isError);

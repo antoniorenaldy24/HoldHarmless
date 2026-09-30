@@ -12,6 +12,7 @@
     "@holdharmless/agent": "workspace:*",
     "@holdharmless/callmodel": "workspace:*",
     "@holdharmless/classifier": "workspace:*",
+    "@holdharmless/detectors": "workspace:*",
     "@holdharmless/events": "workspace:*",
     "@holdharmless/invariants": "workspace:*",
     "@holdharmless/prompts": "workspace:*",

@@ -297,7 +297,7 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
       // The HUMAN time the phase just spent is credited to THAT phase, before
       // the channel change can move it (entering CLOSED moves it to DONE).
       followHumanTime(body.from, body.to);
-      phase.onChannelChange(body.to);
+      phase.onChannelChange(body.to, body.producer);
       followSegment(body.from, body.to);
       // ADR-017's reset list, with the segment that just ended.
       disclosure.onChannelChange(body.from, body.to, lastHoldSegmentMs);
@@ -318,13 +318,24 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
   let framesObserved = 0;
   let stopped = false;
 
+  /**
+   * §3.3 rule 4: `seq` is assigned by the core, and only by the core. The
+   * classifiers leave it 0 for exactly that reason — and until 2026-09-30
+   * nothing here assigned it, so every producer a classifier observation
+   * caused pointed at seq 0 instead of at the observation. The number given is
+   * the seq of the event about to carry it, so an observation, the
+   * `*.observed` event and every transition it produces name one another.
+   */
+  const numbered = <O extends { seq: number }>(o: O): O => ({ ...o, seq: deps.log.length });
+
   deps.transport.onAudio((frame) => {
     if (stopped) return;
     // Every frame, quiet ones included: see rule 3 in the header. The counter
     // sits on this line so it cannot say a frame was observed that was not.
     framesObserved++;
-    const observation = acoustic.push(muLaw.decode(frame), nowMs());
-    if (!observation) return;
+    const raw = acoustic.push(muLaw.decode(frame), nowMs());
+    if (!raw) return;
+    const observation = numbered(raw);
     // §9.3: written before it is acted on.
     deps.log.append({ t: 'acoustic.observed', obs: observation });
     gate.onAcoustic(observation);
@@ -336,8 +347,9 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
     // HOLD_CONFIRM_MS counts three seconds of silence after a cue, not three
     // seconds after it (see channel.ts).
     driver.onFarEndSpeech();
-    const observation = semantic.push(text, atMs);
-    if (!observation) return;
+    const raw = semantic.push(text, atMs);
+    if (!raw) return;
+    const observation = numbered(raw);
     deps.log.append({ t: 'semantic.observed', obs: observation });
     // The channel first: a person answering while suspicion stands moves the
     // channel, and then the controller clears suspicion — one widening, not two.

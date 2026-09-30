@@ -484,6 +484,16 @@ describe('over the loopback transport, with real audio', () => {
 
     assert.ok(loop.gate.holdSuspected || loop.gate.channel === 'HOLD', 'the acoustic layer was heard');
     assert.equal(tp.intent, 'closed', 'and the gate followed it to the transport');
+
+    // §3.3 rule 4 on the acoustic side: the gate change names the observation
+    // that caused it, and that observation carries its own event's seq.
+    const ev = log.events();
+    const shut = ev.find((e) => e.t === 'gate.changed' && e.to === 'closed')!;
+    assert.ok(shut.t === 'gate.changed' && shut.producer.kind === 'acoustic');
+    const cause = ev[shut.producer.kind === 'acoustic' ? shut.producer.seq : -1];
+    assert.ok(cause && cause.t === 'acoustic.observed', 'the producer seq is the acoustic.observed event');
+    assert.equal(cause.t === 'acoustic.observed' && cause.obs.seq, cause.seq);
+    loop.stop();
   });
 });
 
@@ -513,6 +523,19 @@ describe('a call reaches a person without anyone setting the channel (§5.3)', (
     const k = r.kinds();
     const at = k.lastIndexOf('channel.changed');
     assert.equal(k[at + 1], 'phase.changed');
+    // …and it names the SAME producer: the semantic observation that moved the
+    // channel (§5.4 row 1, INV-13, INV-21) — not a stand-in.
+    const ev = r.log.events();
+    const ch = ev[at]!;
+    const ph = ev[at + 1]!;
+    assert.ok(ch.t === 'channel.changed' && ph.t === 'phase.changed');
+    assert.equal(ch.producer.kind, 'semantic');
+    assert.deepEqual(ph.producer, ch.producer);
+    // §3.3 rule 4: the core numbers observations, so the producer POINTS at the
+    // observation that caused the move — which names itself by the same seq.
+    const cause = ev[ch.producer.kind === 'semantic' ? ch.producer.seq : -1];
+    assert.ok(cause && cause.t === 'semantic.observed', 'the producer seq is the semantic.observed event');
+    assert.equal(cause.t === 'semantic.observed' && cause.obs.seq, cause.seq);
   });
 
   test('the most common path of all: IVR → HOLD → HUMAN, a queue answered', async () => {

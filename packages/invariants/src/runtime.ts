@@ -327,10 +327,18 @@ export const INVARIANTS: readonly Invariant[] = [
       'record_outcome is accepted only while the request status is not final, keyed on requestId. Within one log, ' +
       'no record_outcome is accepted after a final status has been written.',
     check(ctx) {
+      // "Already final" is judged when the call was MADE. The handler executes
+      // before it reports (§8.8 rule 3: the effect stands whatever happens to
+      // the result), so an accepted record_outcome writes its own final status
+      // and THEN logs tool.returned. Judged at tool.returned, every legitimate
+      // outcome read as accepted-after-final — found on 2026-09-30, the first
+      // time a live call path was checked against this invariant.
       let finalWritten = false;
+      const finalWhenCalled = new Map<string, boolean>();
       for (const e of ctx.log) {
         if (e.t === 'outcome.written' && !e.skipped && isFinalStatus(e.status)) finalWritten = true;
-        if (e.t === 'tool.returned' && e.name === 'record_outcome' && finalWritten) {
+        if (e.t === 'tool.called' && e.name === 'record_outcome') finalWhenCalled.set(e.toolCallId, finalWritten);
+        if (e.t === 'tool.returned' && e.name === 'record_outcome' && (finalWhenCalled.get(e.toolCallId) ?? finalWritten)) {
           return `seq ${e.seq}: record_outcome accepted after the status was already final`;
         }
       }
