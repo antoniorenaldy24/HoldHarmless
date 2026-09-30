@@ -7,6 +7,16 @@
 # (§6.6). The recorder/player code in packages/fixtures/src is tracked; a test
 # fails if anything else under packages/fixtures is.
 packages/fixtures/data/
+# The owner's own recordings of docs/recording-script.md, kept where they were
+# made. Same reason as the line above: real voices, public repository (§6.6).
+rekaman/
+# And any raw audio anywhere, as a backstop: a recording saved to a folder
+# nobody thought to list here is exactly how a voice ends up on GitHub.
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.ogg
 hh-day0/logs/
 hh-day0/audio/
 !hh-day0/logs/.gitkeep

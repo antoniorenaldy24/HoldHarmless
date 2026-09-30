@@ -372,6 +372,20 @@ describe('fixture data stays out of the repository (§6.6)', () => {
     }
   });
 
+  test('no raw audio is tracked anywhere, and the owner s recording folder is ignored', () => {
+    // Added 2026-09-30, when the §6.6 recordings arrived in `rekaman/` at the
+    // repository root — not in `packages/fixtures/data/`, which is where the
+    // script asked for them and the only place the test above protects. The
+    // folder was NOT ignored. One `git add -A` would have published a real voice
+    // to a public repository. The guard is now the file type, not the folder,
+    // because the next recording may land somewhere nobody thought to list.
+    const tracked = git('ls-files').stdout.split('\n').filter((f) => /\.(mp3|wav|m4a|flac|ogg)$/i.test(f));
+    assert.deepEqual(tracked, [], 'a raw audio file is tracked');
+    for (const probe of ['rekaman/A01.mp3', 'anywhere/else/take.wav', 'packages/fixtures/data/human/A.wav']) {
+      assert.equal(git('check-ignore', '-q', probe).status, 0, `${probe} would not be ignored`);
+    }
+  });
+
   test('nothing under packages/fixtures is tracked except code', () => {
     const tracked = git('ls-files', 'packages/fixtures').stdout.split('\n').filter(Boolean);
     const stray = tracked.filter((f) => !/^packages\/fixtures\/(src|test)\/[^/]+\.ts$|^packages\/fixtures\/package\.json$/.test(f));

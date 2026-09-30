@@ -125,6 +125,8 @@ export type AcousticOptions = {
   minWeight?: number;
   /** How far the winner must lead the runner-up. `ACOUSTIC_MARGIN` by default. */
   margin?: number;
+  /** `PAUSE_RAMP` by default. For measuring §6.7's alternative, not for adopting it. */
+  pauseRamp?: readonly [number, number];
   /** Injectable for deterministic tests. */
   now?: () => Date;
   windows?: SignalWindows;
@@ -152,7 +154,19 @@ export function voteRms(rms: number): Vote {
   return vote(silence, (1 - silence) / 2, (1 - silence) / 2);
 }
 
-export function votePauseRatio(ratio: number): Vote {
+/**
+ * The pause-ratio ramp: at or below the first value a window votes fully
+ * PERIODIC, at or above the second it votes not at all.
+ *
+ * A named constant and an option rather than two literals, because §6.7 leaves
+ * its value to the project owner and the evidence for that choice has to be
+ * producible by a tool (`pnpm mic-check --sweep`) rather than by editing this
+ * file and re-running. The default is the value in force; the option exists so
+ * the alternative can be MEASURED, not so it can be quietly adopted.
+ */
+export const PAUSE_RAMP: readonly [periodicAt: number, speechAt: number] = [0.10, 0.30];
+
+export function votePauseRatio(ratio: number, rampAt: readonly [number, number] = PAUSE_RAMP): Vote {
   // Measured: hold music 0.00, DTMF 0.26, speech 0.40-0.46, silence 1.00 —
   // and the speech figure there is a WHOLE-CLIP average, which is not what this
   // function is ever given. Re-measured in module 4.1 over the 2 s sliding
@@ -182,6 +196,14 @@ export function votePauseRatio(ratio: number): Vote {
   //     ramp 0.10-0.30 (this one)   6/23 lines mute the agent   hold onset ≤1.5 s
   //     ramp 0.01-0.05              0/23                        hold onset >1.5 s
   //
+  // STALE, and kept so the correction is visible: both rows were measured at
+  // a margin of 0.15, before ACOUSTIC_MARGIN became 0.05. Under the margin in
+  // force they are 9/23 and 1/23. And on the owner's own recordings (§6.7,
+  // `pnpm human-calibration`) the in-force ramp mutes 8 of 68 human clips,
+  // 0.02-0.06 mutes none, and the in-force ramp misses 1.5 s after a
+  // rendered conversation too (2000 ms) — the 1.5 s test passes only on a
+  // synthetic stand-in. The decision is still §6.7's owner's.
+  //
   // §6.7 also names the way out of the trade: "If A-5 cannot be met at that
   // value, the correct response is better signals, not a lower threshold." The
   // candidate is in the same data — across all 23 lines, spectral flatness and
@@ -193,7 +215,7 @@ export function votePauseRatio(ratio: number): Vote {
   //
   // Whichever is chosen, it is chosen on rendered audio until §6.6's recordings
   // exist. `pnpm mic-check --file` re-runs all of it on a human voice.
-  const periodic = ramp(ratio, 0.10, 0.30);
+  const periodic = ramp(ratio, rampAt[0], rampAt[1]);
   const silence = Math.max(0, (ratio - 0.8) / 0.2);
   return vote(silence, periodic * (1 - silence), (1 - periodic) * (1 - silence));
 }
@@ -223,6 +245,7 @@ export interface AcousticClassifier {
 export function createAcousticClassifier(options: AcousticOptions = {}): AcousticClassifier {
   const minWeight = options.minWeight ?? 0.5;
   const margin = options.margin ?? ACOUSTIC_MARGIN;
+  const pauseRamp = options.pauseRamp ?? PAUSE_RAMP;
   const now = options.now ?? (() => new Date());
   const windows = options.windows ?? createSignalWindows();
 
@@ -252,7 +275,7 @@ export function createAcousticClassifier(options: AcousticOptions = {}): Acousti
       };
       const votes: Record<string, Vote> = {
         rms: voteRms(values['rms']!),
-        pauseRatio: votePauseRatio(values['pauseRatio']!),
+        pauseRatio: votePauseRatio(values['pauseRatio']!, pauseRamp),
         spectralFlatness: voteSpectralFlatness(values['spectralFlatness']!),
         autocorrelation: voteAutocorrelation(values['autocorrelation']!),
       };

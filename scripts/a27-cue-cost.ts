@@ -220,12 +220,13 @@ console.log('  The real agent_mute_during_conversation_ms is measured at the har
 // The finding, stated by the script rather than left to a reader's arithmetic.
 if (p !== null) {
   const floor = p * SHORTEST_TURN_MS;
-  console.log('\n  A-27 S BAR CANNOT BE MET, and not because of this implementation.');
+  console.log('\n  A-27 S BAR IS NOT MET at a realistic turn length, and not because of this implementation.');
   console.log(`  The cost is structurally ${p} turns: §6.5 clears suspicion at N=2, and every`);
-  console.log(`  trial took exactly that — never more, never fewer. The SHORTEST representative`);
-  console.log(`  line in the whole catalogue is ${SHORTEST_TURN_MS} ms, so the least this can ever`);
-  console.log(`  cost is ${floor} ms against a bar of 1500 ms. At the median turn, ${p * TYPICAL_TURN_MS} ms.`);
-  console.log('  The bar and the mechanism were never reconciled. §20 records the options.');
+  console.log(`  trial took exactly that — never more, never fewer. On the RENDERED catalogue the`);
+  console.log(`  shortest line is ${SHORTEST_TURN_MS} ms (two: ${floor} ms) and the median gives ${p * TYPICAL_TURN_MS} ms,`);
+  console.log('  against a bar of 1500 ms. On a human voice the median turn is 2880 ms (two:');
+  console.log('  5760 ms) — but a backchannel can be 500 ms, so "cannot ever" is too strong');
+  console.log('  (`pnpm human-calibration`, section 4). §6.3 records the options.');
 }
 
 if (neverReopened > 0) process.exitCode = 1;
