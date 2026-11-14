@@ -213,6 +213,9 @@ $env:IVR_SCENARIO='transfer'; pnpm call:live
 $env:NETWORK_PROFILE='DEGRADED'; pnpm call:live
 ```
 
+> [!TIP]
+> **Real-Time Speaker Monitoring**: When `ffplay` (ffmpeg) is available on the machine, `pnpm call:live` automatically routes the live telephony audio (IVR voice, DTMF tones, hold music, human representative voices, and the AI voice agent) directly to your PC speakers or headphones in real-time. To run in silent/headless mode, set `$env:AUDIO_SPEAKER='false'`.
+
 ### 5. Verifying Live Call Event Logs
 Every call run writes a detailed JSONL log to the `logs/` directory. You can verify all 21 invariants against any live log using the verification tool:
 

@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn, type ChildProcess } from 'node:child_process';
 import WebSocket from 'ws';
 import { PROFILES, raiseTimerResolution } from '@holdharmless/transport';
 import { LoopbackTransport } from '@holdharmless/transport-loopback';
@@ -67,6 +68,69 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 
+class LiveSpeakerMonitor {
+  private player: ChildProcess | null = null;
+  private closed = false;
+
+  constructor(enabled: boolean) {
+    if (!enabled) return;
+    try {
+      this.player = spawn(
+        'ffplay',
+        [
+          '-nodisp',
+          '-autoexit',
+          '-loglevel',
+          'quiet',
+          '-f',
+          'mulaw',
+          '-ar',
+          '8000',
+          '-ch_layout',
+          'mono',
+          '-probesize',
+          '32',
+          '-analyzeduration',
+          '0',
+          '-',
+        ],
+        { stdio: ['pipe', 'ignore', 'ignore'] }
+      );
+      this.player.on('error', () => {
+        this.player = null;
+      });
+    } catch {
+      this.player = null;
+    }
+  }
+
+  get isEnabled(): boolean {
+    return this.player !== null && !this.closed;
+  }
+
+  playFrame(frame: Uint8Array): void {
+    if (!this.player || this.closed) return;
+    try {
+      this.player.stdin?.write(frame);
+    } catch {}
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.player) {
+      try {
+        this.player.stdin?.end();
+        this.player.kill();
+      } catch {}
+      this.player = null;
+    }
+  }
+}
+
+const speakerEnabled = process.env['AUDIO_SPEAKER'] !== 'false';
+const speaker = new LiveSpeakerMonitor(speakerEnabled);
+
 // Raise system timer resolution for accurate 20ms frame pacing (§4.5)
 const timer = raiseTimerResolution();
 
@@ -78,6 +142,7 @@ console.log(`  Navigation Mode: ${navMode}`);
 console.log(`  Rep Mode:        ${repMode}`);
 console.log(`  Scenario:        ${scenario}`);
 console.log(`  AssemblyAI Voice:${voice}`);
+console.log(`  Audio Speaker:   ${speaker.isEnabled ? 'ENABLED (real-time output to speakers)' : 'DISABLED'}`);
 console.log(`  Timer Precision: ${timer.detail}`);
 console.log('='.repeat(70));
 
@@ -188,6 +253,19 @@ console.log(`      Web UI Dashboard:   http://localhost:5173 (run 'pnpm --filter
 console.log('[4/5] Initializing call loop and audio bridge...');
 const transport = new LoopbackTransport();
 
+// Stream far-end audio and admitted agent audio to PC speakers
+transport.onAudio((frame) => {
+  speaker.playFrame(frame);
+});
+const origSendAudio = transport.sendAudio.bind(transport);
+transport.sendAudio = (frame, source) => {
+  const admitted = origSendAudio(frame, source);
+  if (admitted) {
+    speaker.playFrame(frame);
+  }
+  return admitted;
+};
+
 let sessionInstance: AgentSession | null = null;
 const call = startCall({
   request,
@@ -265,6 +343,7 @@ console.log(`  Full Event Log:     ${logFile}`);
 console.log('='.repeat(70));
 
 // Flush stream and cleanup
+speaker.close();
 logStream.end();
 controlWs.close();
 await harness.close();
