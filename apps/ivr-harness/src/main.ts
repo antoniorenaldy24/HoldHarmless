@@ -39,8 +39,10 @@ if (repMode === 'HUMAN_REP' && !micDevice) {
   throw new Error('REP_MODE=HUMAN_REP needs MIC_DEVICE (§13). List devices with: ffmpeg -list_devices true -f dshow -i dummy');
 }
 
+const scenario = process.env['IVR_SCENARIO'] ?? 'approval';
+
 const harness = await HarnessServer.start({
-  port, profile, assets: fileAssets(), navMode, queueHoldMs: 8000, repMode,
+  port, profile, assets: fileAssets(), navMode, queueHoldMs: 8000, repMode, scenario,
   ...(micDevice ? { microphone: () => new FfmpegMicrophone({ device: micDevice }) } : {}),
 });
 console.log(`harness listening: ${harness.callUrl()} (audio), ${harness.controlUrl()} (control); profile ${profileName}, nav ${navMode}, rep ${repMode}${micDevice ? ` on "${micDevice}"` : ''}`);

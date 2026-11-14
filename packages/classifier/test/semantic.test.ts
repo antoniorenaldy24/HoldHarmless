@@ -141,6 +141,13 @@ describe('A-4: HUMAN against IVR_PROMPT, on partial deltas', () => {
     full.noteAgentSpoke(500);
     assert.equal(stream(full, 'For eligibility and benefits, press one.').at(-1)!.winner, 'IVR_PROMPT');
   });
+
+  test('cumulative transcript updates from ASR do not concatenate or misclassify', () => {
+    const c = createSemanticClassifier();
+    c.push('Thank you for', 100);
+    const o2 = c.push('Thank you for calling Synthetic Health Plan provider services.', 200);
+    assert.equal(o2?.winner, 'IVR_PROMPT');
+  });
 });
 
 describe('HOLD_CUE from partial deltas (§6.3)', () => {

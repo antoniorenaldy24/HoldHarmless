@@ -22,7 +22,8 @@
     "a27": "tsx scripts/a27-cue-cost.ts",
     "human-calibration": "tsx scripts/human-calibration.ts",
     "typecheck:dashboard": "tsc -p apps/dashboard/tsconfig.json",
-    "build:dashboard": "pnpm --filter @holdharmless/dashboard build"
+    "build:dashboard": "pnpm --filter @holdharmless/dashboard build",
+    "call:live": "tsx scripts/run-live-call.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -364,6 +364,7 @@ export function startCallLoop(deps: CallLoopDeps): CallLoop {
 
   deps.transcripts.onFarEndTurnEnd((text, atMs) => {
     if (stopped) return;
+    driver.onFarEndSpeech();
     void atMs;
     deps.log.append({
       t: 'turn.transcribed',

@@ -54,7 +54,62 @@ export interface HarnessSession {
   swapParty(): void;
   close(delayMs: number): Promise<void>;
   telemetry(metric: string, value: number, detail?: string): void;
+  waitForAgentTurn?(opts?: { timeoutMs?: number; silenceMs?: number }): Promise<boolean>;
 }
+
+export type StepSpec =
+  | { kind: 'repSays'; persona: number; line: LineId; field?: string; waitAfter?: boolean }
+  | { kind: 'hold'; durationMs: number; silent?: boolean }
+  | { kind: 'swapParty' };
+
+export const STANDARD_SCENARIOS: Record<string, StepSpec[]> = {
+  approval: [
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_npi', field: 'providerNpi', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_member_id', field: 'memberId', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_dob', field: 'patientDob', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_cpt', field: 'cptCode', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_icd', field: 'icdCode', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_approved', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_readback_correct', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_reference', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_goodbye', waitAfter: false },
+  ],
+  transfer: [
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_npi', field: 'providerNpi', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_member_id', field: 'memberId', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_transfer', waitAfter: false },
+    { kind: 'hold', durationMs: 4000, silent: false },
+    { kind: 'swapParty' },
+    { kind: 'repSays', persona: 2, line: 'rep2_greeting_um', waitAfter: true },
+    { kind: 'repSays', persona: 2, line: 'rep2_ask_member_id', field: 'memberId', waitAfter: true },
+    { kind: 'repSays', persona: 2, line: 'rep2_approved', waitAfter: true },
+    { kind: 'repSays', persona: 2, line: 'rep2_goodbye', waitAfter: false },
+  ],
+  correction: [
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_npi', field: 'providerNpi', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_member_id', field: 'memberId', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_dob', field: 'patientDob', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_cpt', field: 'cptCode', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_icd', field: 'icdCode', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_approved', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_readback_wrong', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_readback_correct', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_reference', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_goodbye', waitAfter: false },
+  ],
+  denial: [
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_npi', field: 'providerNpi', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_member_id', field: 'memberId', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_denied_boilerplate', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_reference', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_goodbye', waitAfter: false },
+  ],
+  clinical_escalation: [
+    { kind: 'repSays', persona: 1, line: 'rep1_ask_npi', field: 'providerNpi', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_clinical_question', waitAfter: true },
+    { kind: 'repSays', persona: 1, line: 'rep1_goodbye', waitAfter: false },
+  ],
+};
 
 /**
  * Above this RMS, a frame from the harness's speaker counts as audible.
@@ -94,12 +149,20 @@ export type HarnessOptions = {
    * on the first turn that needs it and closed with the call.
    */
   microphone?: () => MicrophoneSource;
+  /**
+   * Scenario for the conversation after the IVR greeting.
+   * Can be 'approval', 'transfer', 'correction', 'denial', 'clinical_escalation',
+   * 'none', or a custom sequence of steps. Defaults to 'approval'.
+   */
+  scenario?: string | readonly StepSpec[];
 };
 
 class Session implements HarnessSession {
   readonly pacer: Pacer;
   private readonly digitHandlers: ((d: string) => void)[] = [];
   private readonly speechHandlers: ((t: string) => void)[] = [];
+  private readonly frameListeners = new Set<(f: Uint8Array) => void>();
+  private readonly pendingTurnWaiters = new Set<(r: boolean) => void>();
   private partiesUsed = 1;
   private closed = false;
   /**
@@ -174,6 +237,7 @@ class Session implements HarnessSession {
           this.telemetry('agent_mute_during_conversation_ms', waited, this.repMode);
         }
       }
+      for (const listener of this.frameListeners) listener(frame);
     });
     recognizer?.onUtterance((text) => {
       for (const h of this.speechHandlers) h(text);
@@ -190,6 +254,9 @@ class Session implements HarnessSession {
       recognizer?.close?.();
       void this.mic?.close();
       this.mic = null;
+      for (const waiter of this.pendingTurnWaiters) waiter(false);
+      this.pendingTurnWaiters.clear();
+      this.frameListeners.clear();
     });
   }
 
@@ -337,7 +404,64 @@ class Session implements HarnessSession {
     this.pacer.stop();
     await this.mic?.close();
     this.mic = null;
+    for (const waiter of this.pendingTurnWaiters) waiter(false);
+    this.pendingTurnWaiters.clear();
+    this.frameListeners.clear();
     this.far.hangup();
+  }
+
+  waitForAgentTurn(opts: { timeoutMs?: number; silenceMs?: number; minDurationMs?: number } = {}): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false);
+    const timeoutMs = opts.timeoutMs ?? 25_000;
+    const silenceMs = opts.silenceMs ?? 1500;
+    const minDurationMs = opts.minDurationMs ?? 60;
+
+    return new Promise<boolean>((resolve) => {
+      let started = false;
+      let speechDurationMs = 0;
+      let silenceTimer: NodeJS.Timeout | null = null;
+      let onsetTimer: NodeJS.Timeout | null = null;
+
+      const finish = (result: boolean) => {
+        if (onsetTimer) clearTimeout(onsetTimer);
+        if (silenceTimer) clearTimeout(silenceTimer);
+        this.frameListeners.delete(onFrame);
+        this.pendingTurnWaiters.delete(finish);
+        resolve(result);
+      };
+
+      const onFrame = (frame: Uint8Array) => {
+        if (this.closed) {
+          finish(false);
+          return;
+        }
+        if (frameRms(frame) >= AUDIBLE_RMS) {
+          speechDurationMs += FRAME_MS;
+          if (!started) {
+            started = true;
+            if (onsetTimer) {
+              clearTimeout(onsetTimer);
+              onsetTimer = null;
+            }
+          }
+          if (silenceTimer) clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => {
+            if (speechDurationMs >= minDurationMs) {
+              finish(true);
+            } else {
+              silenceTimer = null;
+            }
+          }, silenceMs);
+        }
+      };
+
+      this.frameListeners.add(onFrame);
+      this.pendingTurnWaiters.add(finish);
+
+      onsetTimer = setTimeout(() => {
+        finish(false);
+      }, timeoutMs);
+    });
   }
 
   telemetry(metric: string, value: number, detail?: string): void {
@@ -350,10 +474,45 @@ class Session implements HarnessSession {
 }
 
 /**
+ * Multi-turn conversation after the IVR greeting — §10.5.
+ *
+ * Runs through the scenario steps. Between steps, waits for the agent to finish
+ * speaking its turn.
+ */
+async function runRepresentativeConversation(s: Session, scenario?: string | readonly StepSpec[]): Promise<void> {
+  if (scenario === 'none') return;
+  const steps = typeof scenario === 'string' ? (STANDARD_SCENARIOS[scenario] ?? STANDARD_SCENARIOS['approval']!) : (scenario ?? STANDARD_SCENARIOS['approval']!);
+
+  let needWait = true;
+  for (const step of steps) {
+    if (s.isClosed) return;
+    if (needWait) {
+      const spoke = await s.waitForAgentTurn({ timeoutMs: 25_000, silenceMs: 1500 });
+      if (s.isClosed || !spoke) return;
+    }
+
+    if (step.kind === 'hold') {
+      await s.playHold(step.durationMs, step.silent ?? false);
+      needWait = false;
+    } else if (step.kind === 'swapParty') {
+      s.swapParty();
+      needWait = false;
+    } else if (step.kind === 'repSays') {
+      if (step.field) {
+        s.telemetry('fields_requested', 1, step.field);
+      }
+      await s.repSays(step.persona, step.line);
+      s.telemetry('rep_line_done', 1, step.line);
+      needWait = step.waitAfter ?? true;
+    }
+  }
+}
+
+/**
  * The week-1 script: navigate the menu, then the first representative answers.
  * Input during a prompt interrupts it, as IVRs allow ("barge-in").
  */
-async function runMenuScript(s: Session, navMode: HarnessNavMode, noInputMs: number, queueHoldMs: number): Promise<void> {
+async function runMenuScript(s: Session, navMode: HarnessNavMode, noInputMs: number, queueHoldMs: number, scenario?: string | readonly StepSpec[]): Promise<void> {
   const nav = new MenuNavigator();
   let noInput: NodeJS.Timeout | null = null;
   // Each action supersedes the one before: a digit that barges into a prompt
@@ -406,6 +565,7 @@ async function runMenuScript(s: Session, navMode: HarnessNavMode, noInputMs: num
         s.telemetry('parties_used', 1);
         await s.repSays(1, 'rep1_greeting');
         s.telemetry('rep_line_done', 1, 'rep1_greeting');
+        await runRepresentativeConversation(s, scenario);
         return;
     }
   };
@@ -468,7 +628,7 @@ export class HarnessServer {
       const callId = pendingIds.shift() ?? `harness-call-${++counter}`;
       const session = new Session(callId, far, options.assets, control, options.recognizer?.(), options.repMode ?? 'BOT_REP', options.microphone);
       sessions.set(callId, session);
-      void runMenuScript(session, options.navMode, options.noInputTimeoutMs ?? NO_INPUT_TIMEOUT_MS, options.queueHoldMs ?? 0).catch((err: unknown) => {
+      void runMenuScript(session, options.navMode, options.noInputTimeoutMs ?? NO_INPUT_TIMEOUT_MS, options.queueHoldMs ?? 0, options.scenario).catch((err: unknown) => {
         session.telemetry('harness_error', 1, String(err));
       });
     });

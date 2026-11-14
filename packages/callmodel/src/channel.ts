@@ -94,6 +94,7 @@ export function createChannelDriver(options: ChannelDriverOptions): ChannelDrive
 
   let humanRun = 0;
   let ivrRun = 0;
+  let lastHoldCueWasTransfer = false;
   let cancelConfirm: (() => void) | null = null;
   let cancelTimeout: (() => void) | null = null;
   let stopped = false;
@@ -153,6 +154,12 @@ export function createChannelDriver(options: ChannelDriverOptions): ChannelDrive
           if (ivrRun >= confirmN && gate.channel === 'HOLD') move('IVR', producer);
           return;
         }
+        case 'HOLD_CUE': {
+          humanRun = 0;
+          ivrRun = 0;
+          lastHoldCueWasTransfer = o.transferHint === true;
+          return;
+        }
         default:
           humanRun = 0;
           ivrRun = 0;
@@ -168,7 +175,7 @@ export function createChannelDriver(options: ChannelDriverOptions): ChannelDrive
       if (stopped) return;
       switch (e.t) {
         case 'hold.suspected':
-          if (e.trigger === 'hold_cue' && (gate.channel === 'IVR' || gate.channel === 'HUMAN')) armConfirm();
+          if (e.trigger === 'hold_cue' && !lastHoldCueWasTransfer && (gate.channel === 'IVR' || gate.channel === 'HUMAN')) armConfirm();
           return;
         case 'hold.cleared':
           disarmConfirm();
@@ -177,6 +184,7 @@ export function createChannelDriver(options: ChannelDriverOptions): ChannelDrive
           // Evidence counted in one channel says nothing about the next.
           humanRun = 0;
           ivrRun = 0;
+          lastHoldCueWasTransfer = false;
           disarmConfirm();
           disarmTimeout();
           if (e.to === 'HOLD') {

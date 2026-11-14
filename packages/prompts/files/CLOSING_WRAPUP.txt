@@ -2,7 +2,7 @@ The call is finished. The authorization number was already confirmed; do not ask
 the representative to confirm it again.
 
 [[RECORD_OUTCOME]]
-Call record_outcome now with the confirmed result.
+Call record_outcome now with status "approved" and auth_number set to the confirmed authorization number.
 [[CLOSING]]
 Then thank them and close politely.
 

@@ -40,13 +40,13 @@ export const MENU: readonly MenuLevel[] = [
   {
     id: 'priorauth',
     prompt: 'ivr_priorauth_menu',
-    options: { '1': 'service' },
+    options: { '1': 'service', '2': 'service' },
     keywords: { '1': ['new', 'submit', 'new request'], '2': ['status', 'existing'] },
   },
   {
     id: 'service',
     prompt: 'ivr_service_menu',
-    options: { '1': REPRESENTATIVE },
+    options: { '1': REPRESENTATIVE, '2': REPRESENTATIVE, '3': REPRESENTATIVE },
     keywords: { '1': ['outpatient', 'procedure', 'imaging'], '2': ['inpatient', 'admission'], '3': ['pharmacy'] },
   },
 ];

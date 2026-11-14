@@ -90,7 +90,7 @@ const IVR_MARKERS = [
   'to continue', 'to repeat', 'to return', 'please enter', 'followed by', 'pound key',
   'star key', 'the pound', 'if you know your', "party's extension", 'partys extension',
   'para ', 'oprima', 'please hold while', 'next available representative', 'all other inquiries',
-  'this call is', 'your call is',
+  'this call is', 'your call is', 'prior authorization', 'outpatient', 'inpatient', 'procedure',
 ];
 
 /** "for <option>, press <digit>" — the shape a menu repeats, in any wording. */
@@ -207,7 +207,17 @@ export function createSemanticClassifier(options: SemanticOptions = {}): Semanti
   return {
     push(delta: string, atMs: number): SemanticObservation | null {
       if (delta.trim() === '' && utterance === '') return null;
-      utterance += delta;
+      const isCumulative =
+        utterance.length > 0 &&
+        (delta.startsWith(utterance) ||
+          (delta.length >= utterance.length - 5 &&
+            delta.slice(0, Math.min(utterance.length, 8)).toLowerCase() ===
+              utterance.slice(0, Math.min(utterance.length, 8)).toLowerCase()));
+      if (isCumulative) {
+        utterance = delta;
+      } else {
+        utterance += delta;
+      }
 
       const scores: Record<SemanticClass, number> = { IVR_PROMPT: 0, HUMAN: 0, HOLD_CUE: 0 };
       const cue = matchHoldCue(utterance);

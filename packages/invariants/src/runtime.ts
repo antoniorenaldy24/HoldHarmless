@@ -283,13 +283,17 @@ export const INVARIANTS: readonly Invariant[] = [
       for (let i = 0; i < ctx.log.length; i++) {
         const e = ctx.log[i]!;
         if (e.t !== 'tool.returned' || e.name !== 'notify_transfer') continue;
-        const rest = ctx.log.slice(i + 1);
-        const nextChannel = rest.find((x) => x.t === 'channel.changed');
+        // The handler executes before it reports (§8.8 rule 3), so channel and party
+        // changes may precede tool.returned. Find the corresponding tool.called.
+        const callIdx = ctx.log.slice(0, i).findLastIndex((x) => x.t === 'tool.called' && x.toolCallId === e.toolCallId);
+        const fromIdx = callIdx >= 0 ? callIdx : i;
+        const eventsFromCall = ctx.log.slice(fromIdx + 1);
+        const nextChannel = eventsFromCall.find((x) => x.t === 'channel.changed');
         if (nextChannel?.t !== 'channel.changed' || nextChannel.to !== 'TRANSFER') {
           return `seq ${e.seq}: notify_transfer accepted but the next channel change is ${nextChannel?.t === 'channel.changed' ? nextChannel.to : 'absent'}`;
         }
-        const backToHuman = rest.findIndex((x) => x.t === 'channel.changed' && x.to === 'HUMAN');
-        const window = backToHuman === -1 ? rest : rest.slice(0, backToHuman);
+        const backToHuman = eventsFromCall.findIndex((x) => x.t === 'channel.changed' && x.to === 'HUMAN');
+        const window = backToHuman === -1 ? eventsFromCall : eventsFromCall.slice(0, backToHuman);
         if (!window.some((x) => x.t === 'party.changed' && x.reason === 'transfer')) {
           return `seq ${e.seq}: notify_transfer accepted but disclosure was not reset for the new party`;
         }

@@ -350,6 +350,39 @@ describe('the harness over the loopback transport', () => {
     await c.close();
   });
 
+  test('representative conversation advances as the agent replies to each prompt', async () => {
+    const h = await start();
+    const c = await startCall(h, 'SYN-CALL-convo');
+    c.transport.applyGate('open');
+
+    await waitFor('main menu', () => c.heard.includes('ivr_main_menu'));
+    await c.pressDigit('3');
+    await waitFor('prior-auth menu', () => c.heard.includes('ivr_priorauth_menu'));
+    await c.pressDigit('1');
+    await waitFor('service menu', () => c.heard.includes('ivr_service_menu'));
+    await c.pressDigit('1');
+    await waitFor('greeting', () => c.heard.includes('rep1_greeting'));
+
+    // Agent replies to greeting with speech
+    for (let i = 0; i < 5; i++) {
+      c.transport.sendAudio(new Uint8Array(BYTES_PER_FRAME).fill(0x55), 'agent');
+      await sleep(20);
+    }
+
+    // Harness should advance to rep1_ask_npi
+    await waitFor('ask npi', () => c.heard.includes('rep1_ask_npi'));
+
+    // Agent replies with NPI
+    for (let i = 0; i < 5; i++) {
+      c.transport.sendAudio(new Uint8Array(BYTES_PER_FRAME).fill(0x55), 'agent');
+      await sleep(20);
+    }
+
+    // Harness should advance to rep1_ask_member_id
+    await waitFor('ask member id', () => c.heard.includes('rep1_ask_member_id'));
+    await c.close();
+  });
+
   test('DTMF: a wrong digit is announced, the menu repeats, and first-try is reported as 0', async () => {
     const h = await start();
     const c = await startCall(h, 'SYN-CALL-wrong');

@@ -1,10 +1,10 @@
-Read this authorization number back to the representative, character by
-character, and ask them to confirm it: <CAPTURED_AUTH_NUMBER>
+Instructions: Read this authorization number back to the representative, character by character, and ask them to confirm it: <CAPTURED_AUTH_NUMBER>
 
-Read exactly that value. Do not re-derive it from memory.
+You must speak this exact sentence to the representative:
+"Let me read the authorization number back to confirm: <CAPTURED_AUTH_NUMBER>. Is that correct?"
+Do not say anything else. Do not ask the representative to read it back to you. Read exactly that value. Do not re-derive it from memory.
 
-If they confirm it is correct, call confirm_readback with matched set to true.
-If they correct you at any point, stop immediately, treat the correction as
-authoritative, and call confirm_readback with matched set to false and the
-corrected value. A correction always outranks what you believed you heard.
+When the representative answers:
+- If they confirm it is correct, acknowledge, or close (for example: "Yes", "That is correct", "Correct", "Okay", "Thanks", "Take care"), immediately call confirm_readback with matched set to true.
+- If they explicitly correct the authorization number with different characters, stop immediately, treat the correction as authoritative, and call confirm_readback with matched set to false and the corrected value. A correction always outranks what you believed you heard.
 Do not proceed until one of those two things has happened.
